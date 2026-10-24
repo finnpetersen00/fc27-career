@@ -155,6 +155,7 @@ svg.i.fill { fill: currentColor; stroke: none; }
 .app { position: fixed; inset: 0; background: var(--bg); }
 .stack { position: absolute; inset: 0; overflow: hidden; }
 .stack[hidden] { display: none; }
+[hidden] { display: none !important; }
 .view { position: absolute; inset: 0; background: var(--bg); overflow: hidden; will-change: transform; contain: layout paint; }
 .view.plain { background: var(--bg-plain); }
 .view .scroll {
@@ -228,6 +229,7 @@ button.row:active, a.row:active, .row.tap:active, .row.pressed { background: var
 @media (prefers-color-scheme: dark) { .row .chev { color: #5a5a5e; } }
 .row.dest { color: var(--red); justify-content: center; }
 .row.act { color: var(--tint); }
+.row.act.dest { color: var(--red); }
 .row.act.center { justify-content: center; }
 .row.disabled { color: var(--label3); pointer-events: none; }
 .row .acc { flex: none; display: flex; align-items: center; gap: 8px; }
@@ -341,7 +343,7 @@ button.card:active, a.card:active { background: var(--highlight); }
 .legend { display: flex; flex-wrap: wrap; gap: 6px 12px; margin-top: 10px; font-size: .706rem; color: var(--label2); }
 .legend span { display: inline-flex; align-items: center; gap: 5px; }
 .legend i { width: 9px; height: 9px; border-radius: 2.5px; display: inline-block; }
-@keyframes slot-in { from { transform: scale(.4); opacity: 0; } to { transform: none; opacity: 1; } }
+@keyframes slot-in { from { transform: scale(.4); opacity: 0; } to { transform: none; } }
 
 /* charts (Swift Charts look) */
 .chart { width: 100%; height: auto; display: block; overflow: visible; }
@@ -421,6 +423,10 @@ button.card:active, a.card:active { background: var(--highlight); }
 .swipe .sw-acts button svg.i { width: 20px; height: 20px; stroke-width: 2; }
 .swipe .sw-front { position: relative; z-index: 1; background: var(--bg2); transition: transform .3s var(--ease); }
 .swipe.dragging .sw-front { transition: none; }
+/* hairlines between swipeable rows (each row sits in its own .swipe wrapper) */
+.swipe + .swipe .sw-front::before, .row + .swipe .sw-front::before, .swipe + .row::before {
+  content: ""; position: absolute; top: 0; left: var(--sep-l, 16px); right: 0; height: .5px; background: var(--sep); z-index: 2;
+}
 
 /* launch / boot */
 .boot { position: fixed; inset: 0; z-index: 200; background: var(--bg); display: grid; place-items: center; transition: opacity .3s; }
@@ -4763,7 +4769,8 @@ class u extends a.FunctionPlugin{avedev(e,t){return this.runFunction(e.args,t,th
     const title = titleOf(def, p);
     let left = def.navLeft ? def.navLeft(K, p, inst) : "";
     if (!left && prevTitle !== null && prevTitle !== undefined) {
-      const bt = prevTitle && prevTitle.length <= 14 ? prevTitle : "Back";
+      // iOS shows the previous title when it fits beside this one, otherwise "Back"
+      const bt = prevTitle && prevTitle.length <= 14 && prevTitle.length + title.length <= 30 ? prevTitle : "Back";
       left = `<button type="button" class="nbtn back" data-nav-back aria-label="Back">${icon("back")}<span>${esc(bt)}</span></button>`;
     }
     if (!left && inSheet && !def.navLeft) left = `<button type="button" class="nbtn" data-sheet-close>${esc(def.cancelLabel || "Cancel")}</button>`;
@@ -5280,7 +5287,13 @@ class u extends a.FunctionPlugin{avedev(e,t){return this.runFunction(e.args,t,th
     const resume = async () => { await S.busyNow("Working"); };
     return {
       async msg(text, kind, title) {
-        await S.alert({ title: title || (kind === "error" ? "Can't Do That" : kind === "warn" ? "Check This" : "Done"), message: String(text || ""), buttons: [{ label: "OK", preferred: true }] });
+        // macro results arrive as "OK: ...", "NO: ...", "ERR: ...": show the sentence, titled the iOS way
+        let body = String(text || "");
+        const m = /^(OK|ERR|NO|EXC):\s*/.exec(body);
+        if (m) { body = body.slice(m[0].length); if (!kind) kind = m[1] === "OK" ? "" : m[1] === "NO" ? "warn" : "error"; }
+        const small = /^(a|an|and|as|at|by|for|in|of|on|or|the|to)$/i;
+        const tc = (t) => String(t).split(" ").map((w, i) => (i > 0 && small.test(w) ? w.toLowerCase() : w.charAt(0).toUpperCase() + w.slice(1))).join(" ");
+        await S.alert({ title: title ? tc(title) : (kind === "error" ? "Can't Do That" : kind === "warn" ? "Check This" : "Done"), message: body, buttons: [{ label: "OK", preferred: true }] });
         await resume();
       },
       async ask(text, buttons, title) {
@@ -5496,6 +5509,8 @@ class u extends a.FunctionPlugin{avedev(e,t){return this.runFunction(e.args,t,th
   /* verdict text -> pill */
   U.stateOf = function (t) {
     const s = String(t || "").toUpperCase();
+    // "No limit", "No salary cap", "No data yet" ... are information, not a failed check
+    if (/^NO (DATA|LIMIT|SALARY|PAY|QUOTA|BONUS|SHARED|INDIVIDUAL|CAP|RULE|FFP|UEFA|CONTINENTAL)/.test(s)) return "";
     if (/^(PASS|OK|FITS|WITHIN|BARGAIN|FAIR|YES|PLAYING)/.test(s)) return "ok";
     if (/^(BREACH|OVER|SHORT|NOT ELIG|NO |REFUSED|PREMIUM|OVERPAY|ENDED)/.test(s) || s === "NO") return "bad";
     if (/^(GUARANTEE|SET LIMIT|CHECK|WARN|ENDS)/.test(s)) return "warn";
@@ -5854,10 +5869,10 @@ class u extends a.FunctionPlugin{avedev(e,t){return this.runFunction(e.args,t,th
     return U.swipeRow(row, [{ label: "Renew", act: "renewPlayer", args: [p.row], color: "var(--tint)", icon: "pencil" }, { label: "Sell", act: "sellPlayer", args: [p.row], color: "var(--orange)", icon: "transfers" }]);
   }
 
-  async function sellRow(K, row) {
-    const app = window.FCApp;
-    app.selection = { sheet: SQ, row };
-    await app.action("LogSale", []);
+  /* selling goes through the Sell Player screen with him preselected: LogSale reads that screen's
+     player first, so logging straight from here could sell a different, half-set-up player */
+  function sellRow(K, row) {
+    S.push("sell", { player: K.wb.get(SQ, "B" + row) });
   }
 
   S.view({
