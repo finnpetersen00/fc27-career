@@ -4983,6 +4983,8 @@ class u extends a.FunctionPlugin{avedev(e,t){return this.runFunction(e.args,t,th
     inst.el.remove();
     clearTrans([prev.el]);
     animating = false;
+    // a change made while the screen slid away (e.g. Remove from Squad, then back) marks it stale: redraw it now
+    if (prev.dirty) renderInst(prev, true);
     afterNav();
   };
   S.popToRoot = async function () {
@@ -5174,6 +5176,7 @@ class u extends a.FunctionPlugin{avedev(e,t){return this.runFunction(e.args,t,th
       await new Promise((r) => setTimeout(r, ms + 20));
       const stack = s.inst.stack;
       stack.items.pop(); s.inst.el.remove(); clearTrans([s.prev.el]);
+      if (s.prev.dirty) renderInst(s.prev, true);
       ignorePop++; history.back();
       afterNav();
     } else {
@@ -5344,8 +5347,14 @@ class u extends a.FunctionPlugin{avedev(e,t){return this.runFunction(e.args,t,th
       list = list.slice(0, 300);
       const cur = pickState.o.value;
       const rows = list.map((x) => `<button type="button" class="row" data-pickv="${esc(JSON.stringify(x.value))}"><span class="lab">${esc(x.label)}${x.sub ? `<span class="sub">${esc(x.sub)}</span>` : ""}</span>${String(x.value) === String(cur) ? `<span class="tint">${icon("check")}</span>` : ""}</button>`).join("");
-      return `${pickState.o.prompt ? `<div class="sec-f" style="padding:0 32px 12px">${esc(pickState.o.prompt)}</div>` : ""}
-        <div class="sec"><div class="list">${rows || `<div class="empty"><b>No results</b>Try a different spelling.</div>`}</div>${total > 300 ? `<div class="sec-f">Showing 300 of ${total}. Keep typing to narrow it down.</div>` : ""}</div>`;
+      // custom entries (e.g. a regen who isn't in the database): offer the typed text itself
+      const raw = (p.q || "").trim();
+      const exact = raw && pickState.opts.some((x) => norm(x.label) === norm(raw));
+      const custom = pickState.o.custom && raw && !exact
+        ? `<div class="sec"><div class="list"><button type="button" class="row act" data-pickv="${esc(JSON.stringify(raw))}">${icon("plusc")}<span class="lab">Use “${esc(raw)}”</span></button></div>${pickState.o.customNote ? `<div class="sec-f">${esc(pickState.o.customNote)}</div>` : ""}</div>`
+        : "";
+      return `${pickState.o.prompt ? `<div class="sec-f" style="padding:0 32px 12px">${esc(pickState.o.prompt)}</div>` : ""}${custom}
+        ${rows || !custom ? `<div class="sec"><div class="list">${rows || `<div class="empty"><b>No results</b>Try a different spelling.</div>`}</div>${total > 300 ? `<div class="sec-f">Showing 300 of ${total}. Keep typing to narrow it down.</div>` : ""}</div>` : ""}`;
     },
     mount(Kx, root) {
       root.querySelectorAll("[data-pickv]").forEach((b) => b.addEventListener("click", () => {
@@ -5417,7 +5426,7 @@ class u extends a.FunctionPlugin{avedev(e,t){return this.runFunction(e.args,t,th
     const cur = K.wb.get(r.sheet, r.addr);
     const opts = list.map((x) => (typeof x === "object" && x !== null ? x : { label: String(x), value: x }));
     if (r.o.allowClear !== false) opts.unshift({ label: r.o.clearLabel || "None", value: "" });
-    const v = await S.pick({ title: r.o.title || r.o.label || "Choose", options: opts, value: cur });
+    const v = await S.pick({ title: r.o.title || r.o.label || "Choose", options: opts, value: cur, custom: r.o.custom, customNote: r.o.customNote });
     if (v === null || v === undefined) return;
     if (r.o.onPick) { r.o.onPick(v); return; }
     app.setCell(r.sheet, r.addr, v === "" ? null : v, { rerender: !!r.o.rerender });
@@ -5552,7 +5561,7 @@ class u extends a.FunctionPlugin{avedev(e,t){return this.runFunction(e.args,t,th
     o = o || {};
     const list = o.list || K.dvList(sheet, addr);
     if (o.kind !== "text" && o.kind !== "number" && list && (list.length > 40 || o.searchPicker)) {
-      return `<button type="button" class="row" ${S.pickRowAttr(sheet, addr, { label, list: o.list, rerender: o.rerender, title: o.title || label, clearLabel: o.clearLabel })}>${o.icon || ""}<span class="lab">${label}${o.sub ? `<span class="sub">${o.sub}</span>` : ""}</span><span class="val">${K.out(sheet, addr, { blank: o.placeholder || "None" })}</span>${CHEV}</button>`;
+      return `<button type="button" class="row" ${S.pickRowAttr(sheet, addr, { label, list: o.list, rerender: o.rerender, title: o.title || label, clearLabel: o.clearLabel, custom: o.custom, customNote: o.customNote })}>${o.icon || ""}<span class="lab">${label}${o.sub ? `<span class="sub">${o.sub}</span>` : ""}</span><span class="val">${K.out(sheet, addr, { blank: o.placeholder || "None" })}</span>${CHEV}</button>`;
     }
     if (o.kind !== "text" && o.kind !== "number" && list) {
       return `<label class="row">${o.icon || ""}<span class="lab">${label}${o.sub ? `<span class="sub">${o.sub}</span>` : ""}</span><span class="pick${o.tinted === false ? "" : " tinted"}"><span class="pv">${K.out(sheet, addr, { blank: o.placeholder || "None", fmt: o.fmt })}</span>${UPDOWN}${K.input(sheet, addr, { inTable: true, kind: "select", list: o.list, label, rerender: o.rerender })}</span></label>`;
@@ -6453,7 +6462,9 @@ class u extends a.FunctionPlugin{avedev(e,t){return this.runFunction(e.args,t,th
           <div style="flex:1;min-width:0"><div class="t-title3" style="overflow-wrap:anywhere">${K.out(SQ, c("name"))}</div><div class="c2 t-sub">${K.out(SQ, c("positions"), { blank: "" })}</div></div>
           <div style="text-align:center"><div class="ovr hi" style="height:34px;min-width:44px;font-size:1.06rem">${K.out(SQ, c("ovr"), { blank: "-" })}</div><div class="c2 t-cap2" style="margin-top:3px">POT ${K.out(SQ, c("pot"), { blank: "-" })}</div></div>
         </div></div>` : "";
-      const nameRow = U.editRow(K, SQ, c("name"), "Name", { rerender: true, searchPicker: true, placeholder: "Choose" });
+      // regens and other players who aren't in the FC27 database: the picker offers the typed name itself
+      const nameRow = U.editRow(K, SQ, c("name"), "Name", { rerender: true, searchPicker: true, placeholder: "Choose", custom: true,
+        customNote: "Not in the FC27 database? Use his name, then fill in his position, OVR, POT, age and wage." });
       // essentials: a new player starts with his name (the database fills the rest)
       const main = U.sec({ footer: (name ? "" : "Pick a name from the FC27 database, or type a regen's name. ") + `<span data-sq-over hidden>Red: his wage is above this league's pay limit.</span>` },
         (name ? "" : nameRow) +
@@ -6510,8 +6521,9 @@ class u extends a.FunctionPlugin{avedev(e,t){return this.runFunction(e.args,t,th
         const name = K.wb.get(SQ, "B" + args[0]);
         const i = await S.alert({ title: `Remove ${name}?`, message: "This clears his squad row without logging a sale. To sell him, use Sell Player instead.", buttons: [{ label: "Cancel", style: "cancel" }, { label: "Remove", style: "destructive" }] });
         if (i !== 1) return;
+        // back to the list first, then remove: rows below move up, so this screen would show the next player
+        await S.pop();
         window.FCApp.M.RemoveSquadRow(args[0]);
-        S.pop();
       },
     },
     enumerate: () => Array.from({ length: 40 }, (_, i) => ({ row: 6 + i })),
