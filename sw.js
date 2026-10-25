@@ -1,6 +1,6 @@
 /* FC27 Career service worker: cache-first so the app opens instantly and works offline.
    A new build ships a new VERSION; the old cache is dropped once the new one is ready. */
-const VERSION = "390083d59572";
+const VERSION = "0dd114e8e3d6";
 const CACHE = "fc27-career-" + VERSION;
 const CORE = ["./", "index.html", "manifest.webmanifest", "data/model.json", "data/fm.json", "icons/icon-180.png", "icons/icon-192.png", "icons/icon-512.png"];
 

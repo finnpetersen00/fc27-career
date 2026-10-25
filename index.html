@@ -530,6 +530,25 @@ html.wel-gate .view .scroll { padding-bottom: calc(var(--safe-b) + 32px); }
 /* Squad tab (20-squad.js) */
 .sq-head { display: flex; justify-content: space-between; gap: 12px; }
 .sec.sq-nocover { margin-bottom: 14px; }
+/* a quiet tag in a player's sub-line (a loaned-in player) */
+.sq-tag { display: inline-block; padding: 0 5px; border-radius: 4px; background: var(--fill3); color: var(--label2); font-size: .706rem; font-weight: 600; line-height: 1.5; letter-spacing: .01em; vertical-align: 1px; white-space: nowrap; }
+
+/* 25-loans.css */
+/* Loans (25-loans.js): the Loan Out / Loan In forms. Every selector is scoped to .loan */
+
+/* a grouped-list inset above the first section, as in Settings sub-pages */
+.loan { padding-top: 14px; }
+
+/* the player row at the top: Settings account-row style */
+.loan .loan-hero { gap: 14px; min-height: 80px; padding-top: 12px; padding-bottom: 12px; }
+.loan .loan-avw { position: relative; flex: none; width: 56px; height: 56px; }
+.loan .loan-av { position: absolute; inset: 0; width: 56px; height: 56px; min-width: 0; padding: 0; border-radius: 50%; font-size: 1rem; font-family: var(--font-round); letter-spacing: 0; }
+.loan .loan-av-ph svg.i { width: 30px; height: 30px; stroke-width: 1.6; }
+.loan .loan-name { display: block; font-size: 1.176rem; line-height: 1.25; font-weight: 600; letter-spacing: -0.023em; overflow-wrap: anywhere; }
+
+/* values and pickers keep their width; a long label wraps instead */
+.loan .row .val, .loan .row .pick { flex-shrink: 0; }
+.loan .loan-num .fld { flex: 0 1 46%; }
 
 /* 30-transfers.css */
 /* Transfers tab (30-transfers.js): hub, ledgers, deal screens, player database.
@@ -594,6 +613,8 @@ html.wel-gate .view .scroll { padding-bottom: calc(var(--safe-b) + 32px); }
 .tf-v .pos, .tf-dbrow .pos { min-width: 40px; }
 /* a formula with nothing to show yet: a quiet dash */
 .tf-v .tf-nil { color: var(--label3); font-weight: 400; }
+/* a quiet tag on a loan deal's sub-line */
+.tf-tag { display: inline-block; padding: 0 5px; border-radius: 4px; background: var(--fill3); color: var(--label2); font-size: .706rem; font-weight: 600; line-height: 1.5; letter-spacing: .01em; vertical-align: 1px; white-space: nowrap; }
 
 /* 40-deals.css */
 /* Deal Structurer (buy, sell, renew, deal-*): every selector is scoped to .deal */
@@ -2441,7 +2462,7 @@ class u extends a.FunctionPlugin{avedev(e,t){return this.runFunction(e.args,t,th
 </script>
 <script>
 /* FC27 workbook macros: a 1:1 JavaScript port of the workbook's VBA modules
-   (modGlobals, modImport, modTransfers, modYouth, modSeason, modReset, modUpgrades).
+   (modGlobals, modImport, modTransfers, modYouth, modSeason, modReset, modUpgrades, modLoans).
 
    FCMacros.create(wb, deps) -> api
      wb   = FCWorkbook.create(HF, model) api
@@ -2479,6 +2500,10 @@ class u extends a.FunctionPlugin{avedev(e,t){return this.runFunction(e.args,t,th
     YA_FIRST: 6, YA_LAST: 21,
     LGR_FIRST: 52, LGR_LAST: 171,
     SQ_COL_BORN: 39,
+    // Squad loan columns (hidden AO..AT, typed by the loan macros) and AU = wage cost (a formula)
+    SQ_COL_LOAN: 41, SQ_COL_LOANPCT: 42, SQ_COL_LOANCLUB: 43, SQ_COL_LOANEND: 44, SQ_COL_LOANFEE: 45,
+    SQ_COL_LOANTYPE: 46, SQ_COL_WAGECOST: 47,
+    LOAN_TYPES: Object.freeze(["Loan", "Loan + option to buy", "Loan + obligation to buy"]),
     DEFAULT_WAGE_BUDGET: 3000000,
     TI_COL_DEAL: 20, TI_COL_NOTES: 21, TI_IN_LAST: 21,
     TO_COL_DEAL: 17, TO_COL_NOTES: 18, TO_IN_LAST: 18,
@@ -2487,7 +2512,8 @@ class u extends a.FunctionPlugin{avedev(e,t){return this.runFunction(e.args,t,th
   const {
     SH_SQUAD, SH_TI, SH_TO, SH_YA, SH_FIN, SH_STATS, SH_DASH, SH_SETUP, SH_DEAL, SH_FFP,
     SQ_FIRST, SQ_LAST, TI_FIRST, TI_LAST, TO_FIRST, TO_LAST, YA_FIRST, YA_LAST, LGR_FIRST, LGR_LAST,
-    SQ_COL_BORN, DEFAULT_WAGE_BUDGET, TI_COL_DEAL, TI_COL_NOTES, TI_IN_LAST, TO_COL_DEAL, TO_COL_NOTES,
+    SQ_COL_BORN, SQ_COL_LOAN, SQ_COL_LOANPCT, SQ_COL_LOANCLUB, SQ_COL_LOANEND, SQ_COL_LOANFEE, SQ_COL_LOANTYPE,
+    LOAN_TYPES, DEFAULT_WAGE_BUDGET, TI_COL_DEAL, TI_COL_NOTES, TI_IN_LAST, TO_COL_DEAL, TO_COL_NOTES,
     TO_IN_LAST, vbCrLf,
   } = consts;
 
@@ -2759,19 +2785,22 @@ class u extends a.FunctionPlugin{avedev(e,t){return this.runFunction(e.args,t,th
         (all, pre, cd, col, rd, row) => pre + cd + col + rd + (rd ? row : String(parseInt(row, 10) + dr))))).join('"');
     }
     function CompactSquad() {
-      // read the block once (each row keeps its own typed values; formulas move in R1C1 form)
+      // read the block once (each row keeps its own typed values; formulas move in R1C1 form;
+      // the loan columns AO..AT move with the player)
       const rows = [];
       for (let src = SQ_FIRST; src <= SQ_LAST; src++) {
         const keep = Len(Trim(CStr(cv(SH_SQUAD, src, 2)))) > 0;
-        let cells = null;
+        let cells = null, loan = null;
         if (keep) {
           cells = [];
           for (let c = 1; c <= 24; c++) {
             const f = chasF(SH_SQUAD, src, c);
             cells.push(f ? { f: craw(SH_SQUAD, src, c) } : { v: cv(SH_SQUAD, src, c) });
           }
+          loan = [];
+          for (let c = SQ_COL_LOAN; c <= SQ_COL_LOANTYPE; c++) loan.push(cv(SH_SQUAD, src, c));
         }
-        rows.push({ src, keep, cells });
+        rows.push({ src, keep, cells, loan });
       }
       let dst = SQ_FIRST;
       batch(() => {
@@ -2788,6 +2817,10 @@ class u extends a.FunctionPlugin{avedev(e,t){return this.runFunction(e.args,t,th
                 cset(SH_SQUAD, dst, c, isErr(x.v) ? null : x.v);
               }
             }
+            for (let c = SQ_COL_LOAN; c <= SQ_COL_LOANTYPE; c++) {
+              const v = row.loan[c - SQ_COL_LOAN];
+              cset(SH_SQUAD, dst, c, isErr(v) ? null : v);
+            }
           }
           dst++;
         }
@@ -2798,6 +2831,7 @@ class u extends a.FunctionPlugin{avedev(e,t){return this.runFunction(e.args,t,th
         let n = 0;
         for (const c of [1, 2]) if (!IsEmpty(craw(SH_SQUAD, src, c))) n++;
         for (let c = 12; c <= 24; c++) if (!IsEmpty(craw(SH_SQUAD, src, c))) n++;
+        for (let c = SQ_COL_LOAN; c <= SQ_COL_LOANTYPE; c++) if (!IsEmpty(craw(SH_SQUAD, src, c))) n++;
         if (n > 0 || !chasF(SH_SQUAD, src, 3) || !chasF(SH_SQUAD, src, 10)) toClear.push(src);
       }
       if (toClear.length) batch(() => { for (const r of toClear) ClearSquadRow(r); });
@@ -2819,6 +2853,7 @@ class u extends a.FunctionPlugin{avedev(e,t){return this.runFunction(e.args,t,th
         cclear(SH_SQUAD, r, 2);
         cclear(SH_SQUAD, r, 10, r, 10);
         cclear(SH_SQUAD, r, 12, r, 24);
+        cclear(SH_SQUAD, r, SQ_COL_LOAN, r, SQ_COL_LOANTYPE);   // loan terms
         RestoreSquadFormulas(r);
       });
     }
@@ -2930,8 +2965,9 @@ class u extends a.FunctionPlugin{avedev(e,t){return this.runFunction(e.args,t,th
         if (n === 0) return "ERR: no players found in the database for \"" + club + "\".";
         if (n > 60) throw vbErr("Subscript out of range");   // VBA: the sort below reads idx(61)
 
-        // sort: position order (GK back to front), then OVR descending
-        const posOrder = ["GK", "RB", "RWB", "CB", "LB", "LWB", "CDM", "CM", "CAM", "RM", "LM", "RW", "LW", "CF", "ST"];
+        // sort: FC27's own squad order (GK, defenders right to left, midfield, attack), then OVR descending
+        const posOrder = ["GK", "RWB", "RB", "CB", "LB", "LWB", "CDM", "RM", "CM", "LM",
+                          "CAM", "RF", "CF", "LF", "RW", "ST", "LW"];
         const rank = new Array(n + 1);
         for (let i = 1; i <= n; i++) {
           rank[i] = 99;
@@ -2976,6 +3012,7 @@ class u extends a.FunctionPlugin{avedev(e,t){return this.runFunction(e.args,t,th
               cclear(SH_SQUAD, r, 2);
               cclear(SH_SQUAD, r, 10);
               cclear(SH_SQUAD, r, 12, r, 24);
+              cclear(SH_SQUAD, r, SQ_COL_LOAN, r, SQ_COL_LOANTYPE);
               RestoreSquadFormulas(r);
             }
           }
@@ -2983,6 +3020,7 @@ class u extends a.FunctionPlugin{avedev(e,t){return this.runFunction(e.args,t,th
             const r = firstEmptyB();
             if (r === 0) break;
             const nm = CStr(at(names_, idx[i]));
+            cclear(SH_SQUAD, r, SQ_COL_LOAN, r, SQ_COL_LOANTYPE);   // no stale loan terms
             cset(SH_SQUAD, r, 1, CStr(at(pos_, idx[i])));
             cset(SH_SQUAD, r, 2, nm);
             bCol[r] = Len(Trim(nm)) === 0;
@@ -3159,8 +3197,20 @@ class u extends a.FunctionPlugin{avedev(e,t){return this.runFunction(e.args,t,th
         let m = "OK: " + pName + " logged on Transfers In row " + r + ".";
 
         if (addToSquad) {
-          if (FindRowByValue(SH_SQUAD, 2, SQ_FIRST, SQ_LAST, pName) > 0) {
-            m += " Already in Squad - not re-added.";
+          const er = FindRowByValue(SH_SQUAD, 2, SQ_FIRST, SQ_LAST, pName);
+          if (er > 0) {
+            if (textEq(Trim(CStr(cv(SH_SQUAD, er, SQ_COL_LOAN))), "In")) {
+              // he is here on loan: this signing makes the move permanent
+              const until = CLng(NRv("season_start")) + season - 1 + cYears;
+              batch(() => {
+                cclear(SH_SQUAD, er, SQ_COL_LOAN, er, SQ_COL_LOANTYPE);
+                if (wage > 0) cset(SH_SQUAD, er, 10, wage);
+                cset(SH_SQUAD, er, 12, until);
+              });
+              m += " He was here on loan - now signed for good (loan terms cleared, wage and contract updated).";
+            } else {
+              m += " Already in Squad - not re-added.";
+            }
           } else {
             const sr = FirstEmptyRow(SH_SQUAD, 2, SQ_FIRST, SQ_LAST);
             if (sr === 0) {
@@ -3171,6 +3221,7 @@ class u extends a.FunctionPlugin{avedev(e,t){return this.runFunction(e.args,t,th
               const until = CLng(NRv("season_start")) + season - 1 + cYears;
               const man = manual ? manualPlayerValues() : null;
               batch(() => {
+                cclear(SH_SQUAD, sr, SQ_COL_LOAN, sr, SQ_COL_LOANTYPE);   // no stale loan terms
                 if (Len(CStr(p)) > 0) cset(SH_SQUAD, sr, 1, CStr(p));
                 cset(SH_SQUAD, sr, 2, pName);
                 if (wage > 0) cset(SH_SQUAD, sr, 10, wage);
@@ -3617,6 +3668,7 @@ class u extends a.FunctionPlugin{avedev(e,t){return this.runFunction(e.args,t,th
           if (nb >= ListBMax()) toB = false;
         }
         batch(() => {
+          cclear(SH_SQUAD, sr, SQ_COL_LOAN, sr, SQ_COL_LOANTYPE);   // no stale loan terms
           if (Len(pos) > 0) cset(SH_SQUAD, sr, 1, pos);
           cset(SH_SQUAD, sr, 2, pName);
           if (ovr > 0) cset(SH_SQUAD, sr, 3, ovr);
@@ -3934,6 +3986,10 @@ class u extends a.FunctionPlugin{avedev(e,t){return this.runFunction(e.args,t,th
           NRset("eos_outcome", "Stayed");
         });
 
+        // ---- loans that run out with this season: loaned-out players come back, loaned-in players go back
+        //      (an obligation to buy signs him - logged in the new season's summer window)
+        const loanMsg = ExpireLoans(season);
+
         // ---- List B: anyone born before the new cut-off goes back on List A
         const cutoff = ListBCutoff();
         let movedA = 0;
@@ -3959,6 +4015,7 @@ class u extends a.FunctionPlugin{avedev(e,t){return this.runFunction(e.args,t,th
           m += " Contracts that have ended: " + ended + IIf(nEnded > 8, " and " + (nEnded - 8) + " more", "") +
                " - update Contract Until if you renewed them, or sell / release them.";
         }
+        if (Len(loanMsg) > 0) m += " " + loanMsg;
         m += " Season " + (season + 1) + " (" + SeasonLabel(season + 1) + "): wage budget " +
              Format(NzD(NRv("dash_wbudget")), "#,##0") + "/wk, transfer budget " +
              Format(NzD(NRv("dash_tbudget")), "#,##0") + ".";
@@ -4013,6 +4070,8 @@ class u extends a.FunctionPlugin{avedev(e,t){return this.runFunction(e.args,t,th
       if (Len(leagueNote) > 0) summary += vbCrLf + leagueNote + vbCrLf;
       if (Len(PanelText("eos_next_cont")) > 0) summary += "Next season's continental competition: " + PanelText("eos_next_cont") + vbCrLf;
       else summary += "Next season's continental competition: N/A" + vbCrLf;
+      const endingLoans = LoansEnding(season);
+      if (Len(endingLoans) > 0) summary += "Loans that end now: " + endingLoans + vbCrLf;
       summary += vbCrLf + "Player stats move to Season Stats and the squad stats reset; ages go up a year.";
       if (!(await askYesNo(summary, "Start new season"))) return;
 
@@ -4036,6 +4095,7 @@ class u extends a.FunctionPlugin{avedev(e,t){return this.runFunction(e.args,t,th
             cclear(SH_SQUAD, r, 2);
             cclear(SH_SQUAD, r, 10);
             cclear(SH_SQUAD, r, 12, r, 24);
+            cclear(SH_SQUAD, r, SQ_COL_LOAN, r, SQ_COL_LOANTYPE);   // loan terms
             RestoreSquadFormulas(r);
           }
           // Youth Academy: table + calculator inputs
@@ -4172,6 +4232,491 @@ class u extends a.FunctionPlugin{avedev(e,t){return this.runFunction(e.args,t,th
     }
     function UpgradeStadium() { return RunUpgrade("stadium", "Stadium (+1000 seats)", StadiumUpgradeCost()); }
 
+    /* ============================================================== modLoans
+       A player loaned OUT stays on the Squad sheet (Eligibility = Loaned Out keeps him off every
+       registration count) and the wage bill counts only the share of his wage the club still pays. A
+       player loaned IN joins the squad and the wage bill counts the share the club pays. The terms live in
+       hidden Squad columns AO..AT (AU = wage cost, a formula). Loan fees go on Transfers Out (income of the
+       season, no book value) / Transfers In (a cost of the season, no amortisation); a loan out is not a
+       sale. Start New Season ends the loans that run out (ExpireLoans). */
+
+    /* the canonical loan type for t (case-insensitive); "" when t is not one */
+    function LoanTypeName(t) {
+      for (const k of LOAN_TYPES) if (textEq(Trim(CStr(t)), k)) return k;
+      return "";
+    }
+    /* Shared checks of the loan terms: "" when fine, else the ERR message. VBA ByRef endsSeason / loanType:
+       pass an object {endsSeason, loanType}; it comes back normalised (0 = this season, blank = "Loan"). */
+    function CheckLoanTerms(season, fee, pct, terms, buyFee) {
+      if (season < 1 || season > 15) return "ERR: season must be 1-15.";
+      if (fee < 0 || buyFee < 0) return "ERR: negative fee.";
+      if (pct < 0 || pct > 1) return "ERR: the wage share must be 0-100%.";
+      if (terms.endsSeason <= 0) terms.endsSeason = season;
+      if (terms.endsSeason < season || terms.endsSeason > 15) return "ERR: the loan must end in season " + season + " to 15.";
+      if (Len(Trim(terms.loanType)) === 0) terms.loanType = "Loan";
+      terms.loanType = LoanTypeName(terms.loanType);
+      if (Len(terms.loanType) === 0) return "ERR: loan type must be Loan, Loan + option to buy or Loan + obligation to buy.";
+      return "";
+    }
+
+    /* Squad row `row` goes on loan to toClub. theirWagePct = share of his wage THEY pay (0..1).
+       The loan ends at the end of season endsSeason (0 = this season). buyFee = option / obligation fee. */
+    function LoanOutCore(row, toClub, season, windowTxt, fee, theirWagePct, endsSeason, loanType, buyFee) {
+      try {
+        row = CLng(row); toClub = CStr(toClub); season = CLng(season); windowTxt = CStr(windowTxt);
+        fee = CDbl(fee); theirWagePct = CDbl(theirWagePct); endsSeason = CLng(endsSeason);
+        loanType = CStr(loanType); buyFee = CDbl(buyFee);
+        if (row < SQ_FIRST || row > SQ_LAST) return "ERR: pick a player on the Squad sheet (rows " + SQ_FIRST + "-" + SQ_LAST + ").";
+        const pName = Trim(CStr(cv(SH_SQUAD, row, 2)));
+        if (Len(pName) === 0) return "ERR: Squad row " + row + " is empty.";
+        const cur = Trim(CStr(cv(SH_SQUAD, row, SQ_COL_LOAN)));
+        if (Len(cur) > 0) return "ERR: " + pName + " is already on loan (" + cur + ").";
+        toClub = Trim(toClub); windowTxt = Trim(windowTxt);
+        if (Len(toClub) === 0) return "ERR: enter the club he is going to.";
+        const terms = { endsSeason, loanType };
+        const chk = CheckLoanTerms(season, fee, theirWagePct, terms, buyFee);
+        if (Len(chk) > 0) return chk;
+        endsSeason = terms.endsSeason; loanType = terms.loanType;
+
+        const r = FirstEmptyRow(SH_TO, 3, TO_FIRST, TO_LAST);
+        if (r === 0) return "ERR: Transfers Out log is full (40 rows).";
+        const ourPct = Round(1 - theirWagePct, 6);
+        const pctTxt = Format(theirWagePct * 100, "0");
+        const wageNow = NzD(cv(SH_SQUAD, row, 11));
+
+        batch(() => {
+          // the loan fee: income of this season, no book value (Transfers Out treats loan rows that way)
+          cset(SH_TO, r, 1, season);
+          if (Len(windowTxt) > 0) cset(SH_TO, r, 2, windowTxt);
+          cset(SH_TO, r, 3, pName);
+          cset(SH_TO, r, 4, toClub);
+          cset(SH_TO, r, 5, fee);
+          cset(SH_TO, r, TO_COL_DEAL, loanType);
+          cset(SH_TO, r, TO_COL_NOTES, "Loan: " + toClub + " pay " + pctTxt + "% of his wage until the end of S" + endsSeason);
+          cset(SH_SQUAD, row, 13, "Loaned Out");
+          cset(SH_SQUAD, row, SQ_COL_LOAN, "Out");
+          cset(SH_SQUAD, row, SQ_COL_LOANPCT, ourPct);
+          cset(SH_SQUAD, row, SQ_COL_LOANCLUB, toClub);
+          cset(SH_SQUAD, row, SQ_COL_LOANEND, endsSeason);
+          if (buyFee > 0) cset(SH_SQUAD, row, SQ_COL_LOANFEE, buyFee); else cclear(SH_SQUAD, row, SQ_COL_LOANFEE);
+          cset(SH_SQUAD, row, SQ_COL_LOANTYPE, loanType);
+        });
+
+        return "OK: " + pName + " loaned to " + toClub + " until the end of S" + endsSeason + " (" +
+               SeasonLabel(endsSeason) + "): they pay " + pctTxt + "% of his wage, you pay " +
+               Format(Round(wageNow * ourPct, 0), "#,##0") + "/wk. Eligibility = Loaned Out (off the registration " +
+               "counts). Transfers Out row " + r + IIf(fee > 0, ", loan fee " + Format(fee, "#,##0") + " (income of S" +
+               season + ")", "") + ".";
+      } catch (e) {
+        return "ERR: " + e.message;
+      }
+    }
+
+    /* pName joins on loan from fromClub. wage = his full weekly wage (0 = the database wage);
+       ourWagePct = share of it YOUR club pays (0..1). The loan ends at the end of season endsSeason. */
+    function LoanInCore(pName, fromClub, season, windowTxt, fee, wage, ourWagePct, endsSeason, loanType, buyFee) {
+      try {
+        pName = Trim(CStr(pName)); fromClub = Trim(CStr(fromClub)); season = CLng(season); windowTxt = Trim(CStr(windowTxt));
+        fee = CDbl(fee); wage = CDbl(wage); ourWagePct = CDbl(ourWagePct); endsSeason = CLng(endsSeason);
+        loanType = CStr(loanType); buyFee = CDbl(buyFee);
+        if (Len(pName) === 0) return "ERR: no player name.";
+        if (Len(fromClub) === 0) return "ERR: enter the club he is on loan from.";
+        if (wage < 0) return "ERR: negative wage.";
+        const terms = { endsSeason, loanType };
+        const chk = CheckLoanTerms(season, fee, ourWagePct, terms, buyFee);
+        if (Len(chk) > 0) return chk;
+        endsSeason = terms.endsSeason; loanType = terms.loanType;
+
+        if (FindRowByValue(SH_SQUAD, 2, SQ_FIRST, SQ_LAST, pName) > 0) return "ERR: " + pName + " is already in your squad.";
+        const sr = FirstEmptyRow(SH_SQUAD, 2, SQ_FIRST, SQ_LAST);
+        if (sr === 0) return "ERR: the Squad sheet is full (40 players).";
+        const r = FirstEmptyRow(SH_TI, 3, TI_FIRST, TI_LAST);
+        if (r === 0) return "ERR: Transfers In log is full (40 rows).";
+
+        const dbWage = NzD(PdbLookup(pName, "pdb_wage"));
+        const fullWage = wage > 0 ? wage : dbWage;
+        const ourPct = Round(ourWagePct, 6);
+        const pctTxt = Format(ourPct * 100, "0");
+        const p = PdbLookup(pName, "pdb_pos");
+        const con = NzL(PdbLookup(pName, "pdb_contract"));
+
+        batch(() => {
+          // the loan fee: a cost of this season, no amortisation; K = his full weekly wage
+          cset(SH_TI, r, 1, season);
+          if (Len(windowTxt) > 0) cset(SH_TI, r, 2, windowTxt);
+          cset(SH_TI, r, 3, pName);
+          cset(SH_TI, r, 4, fromClub);
+          cset(SH_TI, r, 5, fee);
+          if (fullWage > 0) cset(SH_TI, r, 11, fullWage);
+          cset(SH_TI, r, TI_COL_DEAL, loanType);
+          cset(SH_TI, r, TI_COL_NOTES, "Loan: you pay " + pctTxt + "% of his wage until the end of S" + endsSeason);
+          // the squad row: lookups stay on their database formulas, like a normal signing
+          cclear(SH_SQUAD, sr, SQ_COL_LOAN, sr, SQ_COL_LOANTYPE);
+          if (Len(CStr(p)) > 0) cset(SH_SQUAD, sr, 1, CStr(p));
+          cset(SH_SQUAD, sr, 2, pName);
+          if (wage > 0 && wage !== dbWage) cset(SH_SQUAD, sr, 10, wage);
+          if (con > 0) cset(SH_SQUAD, sr, 12, con);
+          cset(SH_SQUAD, sr, 13, "All");
+          cset(SH_SQUAD, sr, 14, "A");
+          cset(SH_SQUAD, sr, 15, "N");
+          cset(SH_SQUAD, sr, SQ_COL_LOAN, "In");
+          cset(SH_SQUAD, sr, SQ_COL_LOANPCT, ourPct);
+          cset(SH_SQUAD, sr, SQ_COL_LOANCLUB, fromClub);
+          cset(SH_SQUAD, sr, SQ_COL_LOANEND, endsSeason);
+          if (buyFee > 0) cset(SH_SQUAD, sr, SQ_COL_LOANFEE, buyFee);
+          cset(SH_SQUAD, sr, SQ_COL_LOANTYPE, loanType);
+        });
+
+        return "OK: " + pName + " joins on loan from " + fromClub + " until the end of S" + endsSeason + " (" +
+               SeasonLabel(endsSeason) + "): you pay " + pctTxt + "% of his wage (" +
+               Format(Round(fullWage * ourPct, 0), "#,##0") + "/wk). Transfers In row " + r + ", Squad row " + sr + "." +
+               IIf(fee > 0, " Loan fee " + Format(fee, "#,##0") + " (a cost of S" + season + ").", "") +
+               IIf(buyFee > 0, IIf(loanType === "Loan + obligation to buy", " Obligation", " Option") + " to buy: " +
+                   Format(buyFee, "#,##0") + ".", "");
+      } catch (e) {
+        return "ERR: " + e.message;
+      }
+    }
+
+    /* mode "return": a loaned-out player comes back (Eligibility = All, loan terms cleared).
+       mode "leave":  a loaned-in player goes back (stats kept, career archived, row removed - no gaps).
+       mode "buy":    a loaned-in player signs for good: a Permanent Transfers In row at the buy fee
+                      (or fee, when given), loan terms cleared.
+       VBA: Optional fee As Variant - undefined / null / "" = not given. */
+    function EndLoanCore(row, mode, fee) {
+      try {
+        let hasFee = false, f = 0;
+        if (fee !== undefined && fee !== null) {
+          if (Len(Trim(CStr(fee))) > 0) {
+            if (!IsNumeric(fee)) return "ERR: the fee must be a number.";
+            hasFee = true;
+            f = CDbl(fee);
+          }
+        }
+        return EndLoanAt(CLng(row), CStr(mode), hasFee, f, CurrentSeason(), CurrentSeason(), "");
+      } catch (e) {
+        return "ERR: " + e.message;
+      }
+    }
+
+    /* buySeason / windowTxt: where a "buy" goes on Transfers In; leaveSeason: the season a "leave" is archived in */
+    function EndLoanAt(row, mode, hasFee, fee, buySeason, leaveSeason, windowTxt) {
+      try {
+        mode = LCase(Trim(mode));
+        if (mode !== "return" && mode !== "leave" && mode !== "buy") return "ERR: mode must be return, leave or buy.";
+        if (row < SQ_FIRST || row > SQ_LAST) return "ERR: pick a player on the Squad sheet (rows " + SQ_FIRST + "-" + SQ_LAST + ").";
+        const pName = Trim(CStr(cv(SH_SQUAD, row, 2)));
+        if (Len(pName) === 0) return "ERR: Squad row " + row + " is empty.";
+        const loanDir = Trim(CStr(cv(SH_SQUAD, row, SQ_COL_LOAN)));
+        const club = Trim(CStr(cv(SH_SQUAD, row, SQ_COL_LOANCLUB)));
+
+        if (mode === "return") {
+          if (!textEq(loanDir, "Out")) return "ERR: " + pName + " is not out on loan.";
+          batch(() => {
+            cset(SH_SQUAD, row, 13, "All");
+            cclear(SH_SQUAD, row, SQ_COL_LOAN, row, SQ_COL_LOANTYPE);
+          });
+          return "OK: " + pName + " is back from his loan" + IIf(Len(club) > 0, " at " + club, "") +
+                 " - registered again (Eligibility = All) and on his full wage.";
+        }
+
+        if (!textEq(loanDir, "In")) return "ERR: " + pName + " is not here on loan.";
+        if (mode === "leave") {
+          const archived = ArchiveLeaver(row, pName, leaveSeason);
+          RemoveSquadRow(row);
+          return "OK: " + pName + "'s loan" + IIf(Len(club) > 0, " from " + club, "") + " has ended - he has gone back, " +
+                 archived + ", removed from the squad.";
+        }
+
+        // buy: a permanent signing at the buy fee (or the fee given)
+        if (hasFee && fee < 0) return "ERR: negative fee.";
+        if (!hasFee) fee = NzD(cv(SH_SQUAD, row, SQ_COL_LOANFEE));
+        if (buySeason < 1 || buySeason > 15) return "ERR: season must be 1-15.";
+        const r = FirstEmptyRow(SH_TI, 3, TI_FIRST, TI_LAST);
+        if (r === 0) return "ERR: Transfers In log is full (40 rows).";
+        const ltype = Trim(CStr(cv(SH_SQUAD, row, SQ_COL_LOANTYPE)));
+        const untilY = NzL(cv(SH_SQUAD, row, 12));
+        const yrs = untilY - (CLng(NRv("season_start")) + buySeason - 1);     // contract years left = amortisation years
+        const wageNow = NzD(cv(SH_SQUAD, row, 11));
+        batch(() => {
+          cset(SH_TI, r, 1, buySeason);
+          if (Len(windowTxt) > 0) cset(SH_TI, r, 2, windowTxt);
+          cset(SH_TI, r, 3, pName);
+          if (Len(club) > 0) cset(SH_TI, r, 4, club);
+          cset(SH_TI, r, 5, fee);
+          if (yrs >= 1) cset(SH_TI, r, 10, yrs);
+          if (wageNow > 0) cset(SH_TI, r, 11, wageNow);
+          cset(SH_TI, r, TI_COL_DEAL, "Permanent");
+          cset(SH_TI, r, TI_COL_NOTES, "Signed after his loan" + IIf(Len(ltype) > 0, " (" + ltype + ")", ""));
+          cclear(SH_SQUAD, row, SQ_COL_LOAN, row, SQ_COL_LOANTYPE);
+        });
+        return "OK: " + pName + " signed for good" + IIf(Len(club) > 0, " from " + club, "") + " for " +
+               Format(fee, "#,##0") + " - Transfers In row " + r + " (S" + buySeason + "); loan terms cleared, you " +
+               "now pay his full wage (" + Format(wageNow, "#,##0") + "/wk)." +
+               IIf(yrs >= 1, "", " Set his Contract Until on the Squad sheet and Contract Yrs on that Transfers In row " +
+                   "so the fee is spread over his contract.");
+      } catch (e) {
+        ProtAllTouched();
+        return "ERR: " + e.message;
+      }
+    }
+
+    /* A loanee leaving: log any unsaved current-season stats, then archive his career totals (as a sale does). */
+    function ArchiveLeaver(row, pName, season) {
+      const apps = NzD(cv(SH_SQUAD, row, 17)), g = NzD(cv(SH_SQUAD, row, 18));
+      const a = NzD(cv(SH_SQUAD, row, 19)), cs = NzD(cv(SH_SQUAD, row, 20));
+      const avgr = NzD(cv(SH_SQUAD, row, 21));
+      const lg = NRrng("stats_log_player");
+      const logFirst = lg.row, logLast = logFirst + lg.rows - 1;
+      if (apps + g + a + cs > 0) {
+        const lr = FirstEmptyRow(SH_STATS, 2, logFirst, logLast);
+        if (lr > 0) {
+          batch(() => {
+            cset(SH_STATS, lr, 1, season);
+            cset(SH_STATS, lr, 2, pName);
+            cset(SH_STATS, lr, 3, apps);
+            cset(SH_STATS, lr, 4, g);
+            cset(SH_STATS, lr, 5, a);
+            cset(SH_STATS, lr, 6, cs);
+            if (avgr > 0) cset(SH_STATS, lr, 7, avgr);
+            cset(SH_STATS, lr, 8, "auto-logged at loan end");
+          });
+        }
+      }
+      let cApps = 0, cG = 0, cA = 0, cCS = 0;
+      const logVals = wb.getRange(SH_STATS, A1(1, logFirst) + ":" + A1(8, logLast));
+      for (let i = logFirst; i <= logLast; i++) {
+        const lrow = logVals[i - logFirst];
+        if (textEq(Trim(CStr(lrow[1])), pName)) {
+          cApps += NzD(lrow[2]);
+          cG += NzD(lrow[3]);
+          cA += NzD(lrow[4]);
+          cCS += NzD(lrow[5]);
+        }
+      }
+      const dp = NRrng("departed_names");
+      const depFirst = dp.row, depLast = depFirst + dp.rows - 1, depCol = dp.col;
+      const dr = FirstEmptyRow(SH_STATS, depCol, depFirst, depLast);
+      if (dr > 0) {
+        const posTxt = CStr(cv(SH_SQUAD, row, 1));
+        batch(() => {
+          cset(SH_STATS, dr, depCol, pName);
+          cset(SH_STATS, dr, depCol + 1, posTxt);
+          cset(SH_STATS, dr, depCol + 2, season);
+          cset(SH_STATS, dr, depCol + 3, cApps);
+          cset(SH_STATS, dr, depCol + 4, cG);
+          cset(SH_STATS, dr, depCol + 5, cA);
+          cset(SH_STATS, dr, depCol + 6, cCS);
+        });
+      }
+      return "career archived (" + CStr(cApps) + " apps, " + CStr(cG) + " G, " + CStr(cA) + " A)";
+    }
+
+    /* What closing season closingSeason does to the loan on Squad row r: "return" (loaned out - he comes
+       back), "buy" (loaned in with an obligation to buy), "leave" (any other loan in); "" = no loan ends. */
+    function LoanEndMode(r, closingSeason) {
+      if (Len(Trim(CStr(cv(SH_SQUAD, r, 2)))) === 0) return "";
+      const d = Trim(CStr(cv(SH_SQUAD, r, SQ_COL_LOAN)));
+      const e = NzL(cv(SH_SQUAD, r, SQ_COL_LOANEND));
+      if (e < 1 || e > closingSeason) return "";
+      if (textEq(d, "Out")) return "return";
+      if (textEq(d, "In")) return textEq(Trim(CStr(cv(SH_SQUAD, r, SQ_COL_LOANTYPE))), "Loan + obligation to buy") ? "buy" : "leave";
+      return "";
+    }
+    /* The loans that end with season closingSeason, for the Start New Season summary ("" = none). */
+    function LoansEnding(closingSeason) {
+      closingSeason = CLng(closingSeason);
+      let lst = "";
+      for (let r = SQ_FIRST; r <= SQ_LAST; r++) {
+        const m = LoanEndMode(r, closingSeason);
+        if (Len(m) > 0) {
+          lst += IIf(Len(lst) > 0, ", ", "") + Trim(CStr(cv(SH_SQUAD, r, 2))) + " (" +
+                 (m === "return" ? "comes back" : m === "buy" ? "signs - obligation to buy" : "goes back") + ")";
+        }
+      }
+      return lst;
+    }
+    /* Start New Season: end every loan whose last season (AR) is closingSeason or earlier. Loaned-out players
+       come back; loaned-in players go back, or sign for good when it is an obligation to buy (Transfers In,
+       the new season's summer window). Returns the sentence for the result message ("" = none ended). */
+    function ExpireLoans(closingSeason) {
+      try {
+        closingSeason = CLng(closingSeason);
+        const plan = [];
+        for (let r = SQ_FIRST; r <= SQ_LAST; r++) {
+          const m = LoanEndMode(r, closingSeason);
+          if (Len(m) > 0) plan.push({ nm: Trim(CStr(cv(SH_SQUAD, r, 2))), md: m });
+        }
+        if (!plan.length) return "";
+        let nBack = 0, nLeft = 0, nBought = 0, probs = "";
+        for (const it of plan) {
+          // rows move when a loanee leaves, so find each player again by name
+          const sr = FindRowByValue(SH_SQUAD, 2, SQ_FIRST, SQ_LAST, it.nm);
+          const res = sr === 0 ? "ERR: not on the Squad sheet."
+            : EndLoanAt(sr, it.md, false, 0, closingSeason + 1, closingSeason, it.md === "buy" ? "Summer" : "");
+          if (Left(res, 2) === "OK") {
+            if (it.md === "return") nBack++;
+            else if (it.md === "leave") nLeft++;
+            else nBought++;
+          } else {
+            probs += IIf(Len(probs) > 0, "; ", "") + it.nm + " - " + res.slice(5);
+          }
+        }
+        return "Loans ended: " + nBack + " back, " + nLeft + " left, " + nBought + " bought." +
+               IIf(Len(probs) > 0, " NOT ended: " + probs, "");
+      } catch (e) {
+        return "Loans: ERR " + e.message;
+      }
+    }
+
+    // ---------------------------------------------------------------- buttons
+    /* InputBox for a number ("%" allowed): null when cancelled or not a number (after saying so) */
+    async function askNumber(prompt, title, def) {
+      const t = Trim(await inputBox(prompt, title, def)).split("%").join("");
+      if (Len(t) === 0) return null;
+      if (!IsNumeric(t)) {
+        await msg("That's not a number.", "warn", title);
+        return null;
+      }
+      return CDbl(t);
+    }
+    /* the selected Squad row, else a player picked / asked for by name (0 = none / cancelled) */
+    async function SquadRowForLoan(title) {
+      const sel = selection();
+      if (sel && sel.sheet === SH_SQUAD && sel.row >= SQ_FIRST && sel.row <= SQ_LAST &&
+          Len(Trim(CStr(cv(SH_SQUAD, sel.row, 2)))) > 0) return sel.row;
+      let nm;
+      if (ui.pick) {
+        const opts = [];
+        for (let r = SQ_FIRST; r <= SQ_LAST; r++) {
+          const x = Trim(CStr(cv(SH_SQUAD, r, 2)));
+          if (Len(x) > 0) opts.push(x);
+        }
+        const v = await ui.pick(title, opts);
+        nm = Trim(v === null || v === undefined ? "" : String(v));
+      } else {
+        nm = Trim(await inputBox("Player (as on the Squad sheet):", title, ""));
+      }
+      if (Len(nm) === 0) return 0;
+      const r = FindRowByValue(SH_SQUAD, 2, SQ_FIRST, SQ_LAST, nm);
+      if (r === 0) await msg("\"" + nm + "\" is not on the Squad sheet.", "warn", title);
+      return r;
+    }
+    function LoanTypeByNumber(k) {
+      switch (CDbl(k)) {
+        case 1: return "Loan";
+        case 2: return "Loan + option to buy";
+        case 3: return "Loan + obligation to buy";
+        default: return "";
+      }
+    }
+    /* VBA asks "1 / 2 / 3" in an InputBox; the app offers the three types as buttons ("" = cancelled) */
+    async function askLoanType(title) {
+      if (ui.ask) {
+        const b = await ui.ask("Loan type?", [LOAN_TYPES[0], LOAN_TYPES[1], LOAN_TYPES[2], "Cancel"], title);
+        return b === 0 || b === 1 || b === 2 ? LOAN_TYPES[b] : "";
+      }
+      const k = await askNumber("Loan type: 1 = Loan, 2 = Loan + option to buy, 3 = Loan + obligation to buy", title, "1");
+      if (k === null) return "";
+      const t = LoanTypeByNumber(k);
+      if (Len(t) === 0) await msg("Pick 1, 2 or 3.", "warn", title);
+      return t;
+    }
+
+    async function LoanOut() {
+      const TTL = "Loan out";
+      const r = await SquadRowForLoan(TTL);
+      if (r === 0) return;
+      const pName = Trim(CStr(cv(SH_SQUAD, r, 2)));
+      if (Len(Trim(CStr(cv(SH_SQUAD, r, SQ_COL_LOAN)))) > 0) {
+        await msg(pName + " is already on loan - end that loan first.", "warn", TTL);
+        return;
+      }
+      const club = Trim(await inputBox("Loan " + pName + " to which club?", TTL, ""));
+      if (Len(club) === 0) return;
+      const fee = await askNumber("Loan fee " + club + " pay you (0 = none):", TTL, "0");
+      if (fee === null) return;
+      const pct = await askNumber("Share of his wage " + club + " pay (%):", TTL, "100");
+      if (pct === null) return;
+      const ends = await askNumber("The loan ends at the end of season (S#):", TTL, CStr(CurrentSeason()));
+      if (ends === null) return;
+      const loanType = await askLoanType(TTL);
+      if (Len(loanType) === 0) return;
+      let buy = 0;
+      if (loanType !== "Loan") {
+        const b = await askNumber("Fee " + club + " pay to sign him for good:", TTL, "0");
+        if (b === null) return;
+        buy = b;
+      }
+      const win = Trim(await inputBox("Transfer window? (Summer / Winter)" + vbCrLf + "Leave blank to skip.", TTL, "Summer"));
+      const res = LoanOutCore(r, club, CurrentSeason(), win, fee, pct / 100, CLng(ends), loanType, buy);
+      await show(res, TTL);
+      return res;
+    }
+
+    async function LoanIn() {
+      const TTL = "Loan in";
+      const pName = Trim(await inputBox("Player joining on loan (database name, or type any name):", TTL,
+                                        Trim(CStr(NRv("ds_buy_player")))));
+      if (Len(pName) === 0) return;
+      const club = Trim(await inputBox("On loan from which club?", TTL, CStr(PdbLookup(pName, "pdb_club"))));
+      if (Len(club) === 0) return;
+      const fee = await askNumber("Loan fee you pay (0 = none):", TTL, "0");
+      if (fee === null) return;
+      const wage = await askNumber("His full weekly wage (0 = the database wage):", TTL, "0");
+      if (wage === null) return;
+      const pct = await askNumber("Share of his wage you pay (%):", TTL, "100");
+      if (pct === null) return;
+      const ends = await askNumber("The loan ends at the end of season (S#):", TTL, CStr(CurrentSeason()));
+      if (ends === null) return;
+      const loanType = await askLoanType(TTL);
+      if (Len(loanType) === 0) return;
+      let buy = 0;
+      if (loanType !== "Loan") {
+        const b = await askNumber("Fee to sign him for good:", TTL, "0");
+        if (b === null) return;
+        buy = b;
+      }
+      const win = Trim(await inputBox("Transfer window? (Summer / Winter)" + vbCrLf + "Leave blank to skip.", TTL, "Summer"));
+      const res = LoanInCore(pName, club, CurrentSeason(), win, fee, wage, pct / 100, CLng(ends), loanType, buy);
+      await show(res, TTL);
+      return res;
+    }
+
+    async function EndLoan() {
+      const TTL = "End loan";
+      const r = await SquadRowForLoan(TTL);
+      if (r === 0) return;
+      const pName = Trim(CStr(cv(SH_SQUAD, r, 2)));
+      const loanDir = Trim(CStr(cv(SH_SQUAD, r, SQ_COL_LOAN)));
+      const club = Trim(CStr(cv(SH_SQUAD, r, SQ_COL_LOANCLUB)));
+      let res;
+      if (textEq(loanDir, "Out")) {
+        if (!(await askYesNo("End " + pName + "'s loan" + IIf(Len(club) > 0, " at " + club, "") + "?" + vbCrLf + vbCrLf +
+                             "He comes back and is registered again.", TTL))) return;
+        res = EndLoanCore(r, "return");
+      } else if (textEq(loanDir, "In")) {
+        const b = ui.ask ? await ui.ask(pName + " is here on loan" + IIf(Len(club) > 0, " from " + club, "") + "." + vbCrLf + vbCrLf +
+                                        "Yes = sign him for good" + vbCrLf +
+                                        "No = end the loan, he goes back" + vbCrLf +
+                                        "Cancel = do nothing", ["Yes", "No", "Cancel"], TTL) : 2;
+        if (b === 0) {
+          const fee = await askNumber("Transfer fee:", TTL, Format(NzD(cv(SH_SQUAD, r, SQ_COL_LOANFEE)), "0"));
+          if (fee === null) return;
+          res = EndLoanCore(r, "buy", fee);
+        } else if (b === 1) {
+          res = EndLoanCore(r, "leave");
+        } else {
+          return;
+        }
+      } else {
+        await msg(pName + " is not on loan.", "info", TTL);
+        return;
+      }
+      await show(res, TTL);
+      return res;
+    }
+
     /* ============================================================== api */
     const api = {
       consts,
@@ -4196,6 +4741,8 @@ class u extends a.FunctionPlugin{avedev(e,t){return this.runFunction(e.args,t,th
       // modUpgrades
       UpgradeFacilityCore, RunUpgrade, UpgradeTraining, UpgradeYouthFac, UpgradeRecruitment, UpgradeJunior,
       UpgradeStadium, StadiumUpgradeCost,
+      // modLoans
+      LoanOutCore, LoanInCore, EndLoanCore, ExpireLoans, LoansEnding, LoanOut, LoanIn, EndLoan,
       // VBA runtime helpers (exposed for tests)
       vba: { CStr, CDbl, CLng, CBool, IsNumeric, IsEmpty, Round, Format, MRound, Trim, textEq, shiftFormula },
     };
@@ -6298,14 +6845,44 @@ class u extends a.FunctionPlugin{avedev(e,t){return this.runFunction(e.args,t,th
 
 </script>
 <script>
-/* Squad tab: players first (by position line, search, swipe to renew or sell), one Squad Rules row
-   that pushes the rules hub (registration / salary cap / continental / roles / depth / academy),
-   the player screen (essentials first, every field editable) and the squad totals. */
+/* Squad tab: players first (by position line in FC27's own position order, search, swipe to renew,
+   loan or sell), loaned-out players in their own On Loan section, one Squad Rules row that pushes the
+   rules hub (registration / salary cap / continental / roles / depth / academy), the player screen
+   (essentials first, every field editable, the loan terms while he's on loan) and the squad totals. */
 (function () {
   "use strict";
   const S = window.FCIOS, U = window.FCUI, esc = S.esc, icon = S.icon;
   const SQ = "Squad";
   const COLS = { pos: "A", name: "B", ovr: "C", pot: "D", age: "E", nat: "F", positions: "G", value: "H", wage: "J", until: "L", elig: "M", list: "N", acad: "O", role: "P", apps: "Q", g: "R", a: "S", cs: "T", avg: "U", refused: "V", notes: "W", dual: "X" };
+  const EURO = "\\€#,##0";
+  const str = (v) => (v === null || v === undefined ? "" : String(v).trim());
+
+  /* FC27's own position order (EA lists the back line right to left), then OVR within a position */
+  const FC_ORDER = ["GK", "RWB", "RB", "CB", "LB", "LWB", "CDM", "RM", "CM", "LM", "CAM", "RF", "CF", "LF", "RW", "ST", "LW"];
+  const posKey = (pos) => str(pos).toUpperCase();
+  const posRank = (pos) => { const i = FC_ORDER.indexOf(posKey(pos)); return i < 0 ? FC_ORDER.length : i; };
+  const byPosition = (a, b) => posRank(a.pos) - posRank(b.pos) || U.num(b.ovr) - U.num(a.ovr);
+  const lineOf = (pos) => U.lineOf(pos) || (/^(RF|LF)$/.test(posKey(pos)) ? "at" : "");
+  const posChip = (pos) => `<span class="pos ${lineOf(pos)}">${esc(pos || "-")}</span>`;
+
+  /* loans: Squad AO "Out"/"In", AP the share of his wage we pay (blank = all of it), AQ the other club,
+     AR the season whose end ends the loan, AS the buy fee, AT the loan type */
+  const LOAN_TYPES = ["Loan", "Loan + option to buy", "Loan + obligation to buy"];
+  const toLoan = (r) => ({ dir: /^out$/i.test(str(r[0])) ? "out" : /^in$/i.test(str(r[0])) ? "in" : "", share: r[1], club: str(r[2]), ends: r[3], buy: r[4], type: str(r[5]) });
+  const loanRows = (K) => K.wb.getRange(SQ, "AO6:AT45").map(toLoan);
+  const loanOf = (K, row) => toLoan(K.wb.getRange(SQ, `AO${row}:AT${row}`)[0]);
+  /* out on loan: logged as a loan, or marked Loaned Out by hand */
+  const isAway = (p, ln) => ln.dir === "out" || str(p.elig) === "Loaned Out";
+  const shareOf = (ln) => (typeof ln.share === "number" ? ln.share : 1);
+  const seasonYears = (K, n) => { const y = (U.num(K.wb.v("season_start")) || 2026) + n - 1; return `${y}/${String((y + 1) % 100).padStart(2, "0")}`; };
+  let clubList = null;
+  function clubOptions(K) {
+    if (clubList) return clubList;
+    let names = [], leagues = [];
+    try { names = K.wb.v("club_names") || []; leagues = K.wb.v("club_league") || []; } catch (e) { /* no club data */ }
+    clubList = names.map((r, i) => ({ label: str(r[0]), value: r[0], sub: str(leagues[i] && leagues[i][0]) })).filter((x) => x.label);
+    return clubList;
+  }
 
   function firstEmptyRow(K) {
     const names = K.wb.getRange(SQ, "B6:B45");
@@ -6349,19 +6926,73 @@ class u extends a.FunctionPlugin{avedev(e,t){return this.runFunction(e.args,t,th
     return { text: `${worst.name}: ${sentence(K.text(SQ, "AC" + worst.r))}`, cls };
   }
 
-  function playerRow(K, p, end) {
-    const until = typeof p.until === "number" ? p.until : null;
-    const contract = until === null ? "" : until < end ? `<span class="c-red">ended ${until}</span>` : until === end ? `<span class="c-orange">ends ${until}</span>` : "to " + until;
-    const sub = [p.age !== null && p.age !== "" ? esc(p.age) + " yrs" : "", esc(p.nat || ""), contract, String(p.list || "").toUpperCase() === "B" ? "List B" : "", ["Loaned Out", "Unregistered", "Continental Only"].includes(String(p.elig)) ? esc(p.elig) : ""].filter(Boolean).join(" · ");
-    const wage = typeof p.wage === "number" ? compact(U.euro(p.wage)) : "";
-    const row = `<button type="button" class="row" data-push="player" data-params='${esc(JSON.stringify({ row: p.row }))}'>${U.posChip(p.pos)}<span class="lab">${esc(p.name)}<span class="sub">${sub}</span></span><span class="acc"><span class="c2 t-sub">${esc(wage)}</span>${U.ovrBadge(p.ovr)}</span>${S.CHEV}</button>`;
-    return U.swipeRow(row, [{ label: "Renew", act: "renewPlayer", args: [p.row], color: "var(--tint)", icon: "pencil" }, { label: "Sell", act: "sellPlayer", args: [p.row], color: "var(--orange)", icon: "transfers" }]);
+  /* one player in the list: the wage is what the club pays (his share while on loan) */
+  function playerRow(K, p, end, ln) {
+    const away = isAway(p, ln), loanIn = ln.dir === "in";
+    let sub;
+    if (away) {
+      sub = [esc(ln.club || "Loaned out"), typeof ln.ends === "number" ? `until S${ln.ends}` : ""].filter(Boolean).join(" · ");
+    } else {
+      const until = typeof p.until === "number" ? p.until : null;
+      const contract = until === null ? "" : until < end ? `<span class="c-red">ended ${until}</span>` : until === end ? `<span class="c-orange">ends ${until}</span>` : "to " + until;
+      sub = [p.age !== null && p.age !== "" ? esc(p.age) + " yrs" : "", esc(p.nat || ""), contract, String(p.list || "").toUpperCase() === "B" ? "List B" : "", ["Unregistered", "Continental Only"].includes(String(p.elig)) ? esc(p.elig) : ""].filter(Boolean).join(" · ");
+      if (loanIn) sub += `${sub ? " " : ""}<span class="sq-tag">Loan</span>`;
+    }
+    const wage = typeof p.wage === "number" ? compact(U.euro(p.wage * shareOf(ln))) : "";
+    const row = `<button type="button" class="row" data-push="player" data-params='${esc(JSON.stringify({ row: p.row }))}'>${posChip(p.pos)}<span class="lab">${esc(p.name)}<span class="sub">${sub}</span></span><span class="acc"><span class="c2 t-sub">${esc(wage)}</span>${U.ovrBadge(p.ovr)}</span>${S.CHEV}</button>`;
+    const renew = { label: "Renew", act: "renewPlayer", args: [p.row], color: "var(--tint)", icon: "pencil" };
+    const endLoanAct = { label: "End Loan", act: "endLoan", args: [p.row], color: "var(--indigo)", icon: "undo" };
+    const acts = loanIn ? [endLoanAct] : away ? [renew, endLoanAct]
+      : [renew, { label: "Loan", act: "loanPlayer", args: [p.row], color: "var(--indigo)", icon: "redo" }, { label: "Sell", act: "sellPlayer", args: [p.row], color: "var(--orange)", icon: "transfers" }];
+    return U.swipeRow(row, acts);
   }
 
   /* selling goes through the Sell Player screen with him preselected: LogSale reads that screen's
      player first, so logging straight from here could sell a different, half-set-up player */
   function sellRow(K, row) {
     S.push("sell", { player: K.wb.get(SQ, "B" + row) });
+  }
+
+  /* End Loan: a loaned-out player comes back; a loaned-in player goes back or is bought.
+     Runs inside FCApp.action (swipe or player screen), which snapshots undo, saves and redraws. */
+  async function endLoan(K, row, onPlayer) {
+    const a = window.FCApp;
+    const name = str(K.wb.get(SQ, "B" + row));
+    if (!name) return;
+    const ln = loanOf(K, row);
+    if (!ln.dir) {
+      // marked Loaned Out by hand, with no loan logged: coming back is just his eligibility
+      if (str(K.wb.get(SQ, "M" + row)) !== "Loaned Out") return;
+      const i = await S.actionSheet({ title: name, message: "He comes back and counts for registration again.", buttons: [{ label: "Bring Back" }, { label: "Cancel", style: "cancel" }] });
+      if (i === 0) a.wb.set(SQ, "M" + row, "All");
+      return;
+    }
+    if (typeof a.M.EndLoanCore !== "function") { await S.alert({ title: "Not Available", message: "This version can't end loans yet." }); return; }
+    const until = typeof ln.ends === "number" ? ` until the end of S${ln.ends}` : "";
+    let mode, fee = null;
+    if (ln.dir === "out") {
+      const i = await S.actionSheet({ title: name, message: ln.club ? `On loan at ${ln.club}${until}.` : "On loan.", buttons: [{ label: "Bring Back" }, { label: "Cancel", style: "cancel" }] });
+      if (i !== 0) return;
+      mode = "return";
+    } else {
+      const buy = U.num(ln.buy);
+      const i = await S.actionSheet({ title: name, message: ln.club ? `On loan from ${ln.club}${until}.` : "On loan.", buttons: [{ label: "Send Back" }, { label: buy > 0 ? `Buy Him (${U.compactMoney(U.euro(buy))})` : "Buy Him…" }, { label: "Cancel", style: "cancel" }] });
+      if (i !== 0 && i !== 1) return;
+      mode = i === 0 ? "leave" : "buy";
+      if (mode === "buy" && !(buy > 0)) {
+        const res = await S.alert({ title: `Buy ${name}`, message: `The fee you pay${ln.club ? " " + ln.club : ""}.`, input: { type: "number", placeholder: "€0" }, buttons: [{ label: "Cancel", style: "cancel" }, { label: "Buy", preferred: true }] });
+        if (!res || res.index !== 1) return;
+        const v = window.FCFormat.parse(res.value, EURO);
+        fee = typeof v === "number" && v > 0 ? v : 0;
+        a.wb.set(SQ, "AS" + row, fee || null);
+      }
+    }
+    // he leaves the squad: back to the list first (rows below move up, this screen would show the next player)
+    if (mode === "leave" && onPlayer) await S.pop();
+    const r = String((fee === null ? a.M.EndLoanCore(row, mode) : a.M.EndLoanCore(row, mode, fee)) || "");
+    // success: a short banner; a problem: the macro's full explanation
+    if (/^OK/.test(r)) S.banner(mode === "return" ? `${name} is back from loan.` : mode === "leave" ? `${name} has gone back${ln.club ? " to " + ln.club : ""}.` : `${name} has signed permanently.`, "", "Loan Ended");
+    else await a.showResult(r);
   }
 
   S.view({
@@ -6374,20 +7005,26 @@ class u extends a.FunctionPlugin{avedev(e,t){return this.runFunction(e.args,t,th
     render(K, p) {
       const q = String(p.q || "").trim().toLowerCase();
       const players = U.squad(K).filter((x) => x.name);
+      const loans = loanRows(K);
+      const ln = (x) => loans[x.row - 6] || toLoan([]);
       const end = seasonEnd(K);
       const hits = q ? players.filter((x) => [x.name, x.nat, x.positions, x.pos].some((f) => String(f || "").toLowerCase().includes(q))) : players;
+      const away = hits.filter((x) => isAway(x, ln(x))).sort(byPosition);
       const groups = { gk: [], df: [], md: [], at: [], "": [] };
-      hits.forEach((x) => groups[U.lineOf(x.pos)].push(x));
-      Object.values(groups).forEach((g) => g.sort((a, b) => U.num(b.ovr) - U.num(a.ovr)));
+      hits.forEach((x) => { if (!isAway(x, ln(x))) groups[lineOf(x.pos)].push(x); });
+      Object.values(groups).forEach((g) => g.sort(byPosition));
       const rs = rulesSummary(K);
       const top = q || !players.length ? "" : U.sec({}, U.row({ label: "Squad Rules", value: `<span data-sq-rules class="${rs.cls}">${esc(rs.text)}</span>`, push: "squad-rules" }));
       let lists = "", first = true;
+      // the wage unit is said once, on the first section
+      const head = (name) => { const h = first ? `<span class="sq-head"><span>${name}</span><span>Wage / wk</span></span>` : name; first = false; return h; };
       for (const k of ["gk", "df", "md", "at", ""]) {
         if (!groups[k].length) continue;
-        const name = `${k ? U.LINE_NAME[k] : "No Position"} · ${groups[k].length}`;
-        // the wage unit is said once, on the first group
-        lists += U.sec({ header: first ? `<span class="sq-head"><span>${name}</span><span>Wage / wk</span></span>` : name }, groups[k].map((x) => playerRow(K, x, end)).join(""));
-        first = false;
+        lists += U.sec({ header: head(`${k ? U.LINE_NAME[k] : "No Position"} · ${groups[k].length}`) }, groups[k].map((x) => playerRow(K, x, end, ln(x))).join(""));
+      }
+      if (away.length) {
+        lists += U.sec({ header: head(`On Loan · ${away.length}`), footer: "They don't take a registration place. Wages are your share." },
+          away.map((x) => playerRow(K, x, end, ln(x))).join(""));
       }
       if (!players.length) {
         lists = `<div class="empty"><b>No players yet</b>Pick your club in Settings and tap Import Club &amp; Squad, or add players one by one with +.</div>` + U.buttons([{ label: "Import Club & Squad", push: "setup", style: "tinted", icon: "import" }]);
@@ -6415,8 +7052,10 @@ class u extends a.FunctionPlugin{avedev(e,t){return this.runFunction(e.args,t,th
       },
       sellPlayer: (K, args) => sellRow(K, args[0]),
       renewPlayer(K, args) { const name = K.wb.get(SQ, "B" + args[0]); S.push("renew", { player: name }); },
+      loanPlayer(K, args) { S.push("loan-out", { row: args[0] }); },
+      endLoan: (K, args) => endLoan(K, args[0], false),
     },
-    covers: ["LogSale"],
+    covers: ["LogSale", "EndLoanCore", "EndLoan"],
     enumerate: () => [{}, { q: "a" }],
   });
 
@@ -6448,6 +7087,36 @@ class u extends a.FunctionPlugin{avedev(e,t){return this.runFunction(e.args,t,th
     enumerate: () => [{}],
   });
 
+  /* the loan terms of a player on loan (Squad AO..AT), every one editable */
+  function loanSeasonRow(K, addr, label) {
+    const sel = K.input(SQ, addr, { inTable: true, kind: "select", list: Array.from({ length: 15 }, (_, i) => i + 1), label, rerender: true })
+      .replace('<option value=""></option>', '<option value="">None</option>')
+      .replace(/<option value="(\d+)">\d+<\/option>/g, (m, n) => `<option value="${n}">${esc(`End of S${n} · ${seasonYears(K, Number(n))}`)}</option>`);
+    const shown = K.out(SQ, addr, { blank: "None", map: (v, t) => (typeof v === "number" ? `End of S${v}` : t) });
+    return `<label class="row"><span class="lab">${label}</span><span class="pick tinted"><span class="pv">${shown}</span>${S.UPDOWN}${sel}</span></label>`;
+  }
+  const shareValid = (v) => (v !== null && (typeof v !== "number" || v < 0 || v > 1) ? "Type a share from 0% to 100%." : "");
+  function loanSection(K, r, ln) {
+    const out = ln.dir === "out";
+    const type = str(K.val(SQ, "AT" + r));
+    const withBuy = /option|obligation/i.test(type);
+    const ends = typeof ln.ends === "number" ? ln.ends : 0;
+    // what happens when the season he's loaned until ends (Start New Season does it)
+    const next = !ends ? "" : out ? `He comes back at the end of S${ends}.`
+      : /obligation/i.test(type) ? `You buy him at the end of S${ends}.`
+        : withBuy ? `He goes back at the end of S${ends} unless you buy him.` : `He goes back at the end of S${ends}.`;
+    // AU is the workbook's wage cost (K x AP); before a workbook has it, the same sum
+    const cost = K.out(SQ, "AU" + r, { fmt: EURO, map: (v, t) => (t !== "" ? t : U.euro(U.num(K.val(SQ, "K" + r)) * shareOf(loanOf(K, r)))) });
+    const foot = `You pay ${cost} of his ${K.out(SQ, "K" + r, { fmt: EURO })} a week.${next ? " " + next : ""}`;
+    return U.sec({ header: "Loan", footer: foot },
+      U.editRow(K, SQ, "AQ" + r, out ? "Loaned to" : "Loaned from", { searchPicker: true, list: () => clubOptions(K), title: "Club", placeholder: "Choose", custom: true, customNote: "Not in the FC27 database? Use the club's name." }) +
+      loanSeasonRow(K, "AR" + r, "Until") +
+      `<label class="row"><span class="lab">Wage we pay</span>${K.input(SQ, "AP" + r, { inTable: true, cls: "fld", kind: "number", label: "Wage we pay", placeholder: "100%", fmt: "0%", validate: shareValid })}</label>` +
+      U.editRow(K, SQ, "AT" + r, "Type", { list: LOAN_TYPES, rerender: true }) +
+      (withBuy ? U.editRow(K, SQ, "AS" + r, "Buy fee", { kind: "number", placeholder: "€0", fmt: EURO }) : "") +
+      U.actRow("End Loan…", "endLoanThis", { args: [r] }));
+  }
+
   /* the player screen: one squad row, every column; what changes most sits first */
   const WAGE_LABEL = "Wage per week";
   S.view({
@@ -6458,7 +7127,7 @@ class u extends a.FunctionPlugin{avedev(e,t){return this.runFunction(e.args,t,th
       const c = (k) => COLS[k] + r;
       const name = K.wb.get(SQ, "B" + r);
       const head = name ? `<div class="sec" style="margin-bottom:22px"><div class="card" style="display:flex;align-items:center;gap:14px">
-          <span class="pos ${U.lineOf(K.val(SQ, c("pos")))}" style="height:44px;min-width:52px;font-size:.882rem;border-radius:10px">${K.out(SQ, c("pos"), { blank: "-" })}</span>
+          <span class="pos ${lineOf(K.val(SQ, c("pos")))}" style="height:44px;min-width:52px;font-size:.882rem;border-radius:10px">${K.out(SQ, c("pos"), { blank: "-" })}</span>
           <div style="flex:1;min-width:0"><div class="t-title3" style="overflow-wrap:anywhere">${K.out(SQ, c("name"))}</div><div class="c2 t-sub">${K.out(SQ, c("positions"), { blank: "" })}</div></div>
           <div style="text-align:center"><div class="ovr hi" style="height:34px;min-width:44px;font-size:1.06rem">${K.out(SQ, c("ovr"), { blank: "-" })}</div><div class="c2 t-cap2" style="margin-top:3px">POT ${K.out(SQ, c("pot"), { blank: "-" })}</div></div>
         </div></div>` : "";
@@ -6475,7 +7144,13 @@ class u extends a.FunctionPlugin{avedev(e,t){return this.runFunction(e.args,t,th
         U.editRow(K, SQ, c("wage"), WAGE_LABEL, { kind: "number" }) +
         U.editRow(K, SQ, c("until"), "Contract until", { kind: "number" }) +
         U.editRow(K, SQ, c("role"), "Role"));
-      const deals = name ? U.sec({}, U.actRow("Renew Contract…", "renewThis", { args: [r] }) + U.actRow("Sell Player…", "sellThis", { args: [r] })) : "";
+      // on loan: the terms, then what's left to do (a loaned-in player can't be renewed or sold)
+      const ln = name ? loanOf(K, r) : toLoan([]);
+      const away = !!name && isAway({ elig: K.val(SQ, c("elig")) }, ln);
+      const loan = ln.dir ? loanSection(K, r, ln) : "";
+      const acts = !name || ln.dir === "in" ? "" : U.actRow("Renew Contract…", "renewThis", { args: [r] }) +
+        (away ? (ln.dir ? "" : U.actRow("Bring Back…", "endLoanThis", { args: [r] })) : U.actRow("Loan Out…", "loanThis", { args: [r] }) + U.actRow("Sell Player…", "sellThis", { args: [r] }));
+      const deals = acts ? U.sec({}, acts) : "";
       const regn = U.sec({ header: "Registration", footer: "List B: an under-age player who doesn't use a List A place." },
         U.editRow(K, SQ, c("elig"), "Eligibility") +
         U.editRow(K, SQ, c("list"), "List") +
@@ -6498,7 +7173,7 @@ class u extends a.FunctionPlugin{avedev(e,t){return this.runFunction(e.args,t,th
         U.valueRow(K, SQ, "AN" + r, "Pay limit (per year)", { map: (v, t) => (typeof v === "number" && v > 0 ? t : "None") }));
       const tail = name ? U.sec({}, U.actRow("Reset to Database Values", "resetThis", { args: [r] })) +
         U.sec({}, U.actRow("Remove from Squad", "removeThis", { args: [r], dest: true, center: true })) : "";
-      return head + main + deals + regn + season + notes + details + tail;
+      return head + main + loan + deals + regn + season + notes + details + tail;
     },
     update(K, root, p) {
       const r = p.row;
@@ -6508,10 +7183,12 @@ class u extends a.FunctionPlugin{avedev(e,t){return this.runFunction(e.args,t,th
       const note = root.querySelector("[data-sq-over]");
       if (note) note.hidden = !over;
     },
-    covers: ["LogSale"],
+    covers: ["LogSale", "EndLoanCore", "EndLoan"],
     actions: {
       sellThis: (K, args) => sellRow(K, args[0]),
       renewThis(K, args) { S.push("renew", { player: K.wb.get(SQ, "B" + args[0]) }); },
+      loanThis(K, args) { S.push("loan-out", { row: args[0] }); },
+      endLoanThis: (K, args) => endLoan(K, args[0], true),
       async resetThis(K, args) {
         const i = await S.alert({ title: "Reset to Database Values?", message: "OVR, POT, age, nationality, positions, value and wage go back to the FC27 database.", buttons: [{ label: "Cancel", style: "cancel" }, { label: "Reset", style: "destructive" }] });
         if (i !== 1) return;
@@ -6549,8 +7226,8 @@ class u extends a.FunctionPlugin{avedev(e,t){return this.runFunction(e.args,t,th
   panelView("continental", "Continental List", [15, 16, 17, 18, 19], ["Z20"], "Z14");
   panelView("roles", "Roles", [32, 33, 34, 35, 36], ["Z37"], "Z31");
 
-  /* depth: the workbook's POSITION DEPTH grid (counts) and players by OVR */
-  const BUCKETS = [["GK", ["GK"], "AG19"], ["RB", ["RB", "RWB"], "AI17"], ["CB", ["CB"], "AG17"], ["LB", ["LB", "LWB"], "AE17"], ["CDM", ["CDM"], "AG15"], ["CM", ["CM"], "AG13"], ["RM", ["RM"], "AI13"], ["LM", ["LM"], "AE13"], ["CAM", ["CAM"], "AG11"], ["RW", ["RW"], "AI9"], ["LW", ["LW"], "AE9"], ["ST", ["ST", "CF"], "AG7"]];
+  /* depth: the workbook's POSITION DEPTH grid (counts) and players by OVR, in FC27's position order */
+  const BUCKETS = [["GK", ["GK"], "AG19"], ["RB", ["RB", "RWB"], "AI17"], ["CB", ["CB"], "AG17"], ["LB", ["LB", "LWB"], "AE17"], ["CDM", ["CDM"], "AG15"], ["RM", ["RM"], "AI13"], ["CM", ["CM"], "AG13"], ["LM", ["LM"], "AE13"], ["CAM", ["CAM"], "AG11"], ["RW", ["RW"], "AI9"], ["ST", ["ST", "CF"], "AG7"], ["LW", ["LW"], "AE9"]];
   S.view({
     id: "depth",
     title: "Depth by OVR",
@@ -6567,6 +7244,322 @@ class u extends a.FunctionPlugin{avedev(e,t){return this.runFunction(e.args,t,th
       return `<div class="sec-f" style="padding:0 32px 14px">Players by position, best first. Bars show OVR.</div>` + secs;
     },
     enumerate: () => [{}],
+  });
+
+  /* the loan screens live in 25-loans; a build without that file gets a placeholder instead of an error */
+  document.addEventListener("DOMContentLoaded", () => {
+    [["loan-out", "Loan Out"], ["loan-in", "Loan In"]].forEach(([id, title]) => {
+      if (S.defs[id]) return;
+      S.view({ id, title, render: () => `<div class="empty"><b>${title}</b>This screen is coming in the next build.</div>`, enumerate: () => [] });
+    });
+  });
+})();
+
+</script>
+<script>
+/* Loans: Loan Out (loan-out {row?}: a squad player joins another club for a while) and Loan In
+   (loan-in: a player joins you on loan). Each form keeps its answers in the view's params and writes
+   nothing until Log Loan…, which asks for the transfer window and runs LoanOutCore / LoanInCore: one
+   Transfers Out / In row (Deal Type = the loan type) plus the Squad row's loan columns (AO "Out"/"In",
+   AP the share of his wage the club pays, AQ the other club, AR the season whose end ends the loan,
+   AS the buy fee, AT the loan type). Ending a loan is on the player screen (20-squad). */
+(function () {
+  "use strict";
+  const S = window.FCIOS, U = window.FCUI, esc = S.esc, icon = S.icon;
+  const SQ = "Squad", EURO = "\\€#,##0";
+  const fc = () => window.FCApp;
+  const LOAN_TYPES = ["Loan", "Loan + option to buy", "Loan + obligation to buy"];
+  const FC_ORDER = ["GK", "RWB", "RB", "CB", "LB", "LWB", "CDM", "RM", "CM", "LM", "CAM", "RF", "CF", "LF", "RW", "ST", "LW"];
+  const str = (v) => (v === null || v === undefined ? "" : String(v).trim());
+  const isBlank = (v) => v === null || v === undefined || v === "";
+  const flat = (v) => (Array.isArray(v) ? v : [[v]]).map((r) => (Array.isArray(r) ? r[0] : r)).filter((x) => !isBlank(x));
+  const posRank = (pos) => { const i = FC_ORDER.indexOf(str(pos).toUpperCase()); return i < 0 ? FC_ORDER.length : i; };
+  const lineOf = (pos) => U.lineOf(pos) || (/^(RF|LF)$/i.test(str(pos)) ? "at" : "");
+  const curSeason = (K) => Math.max(1, Math.min(15, U.num(K.wb.v("season_i")) || 1));
+  const seasonYears = (K, n) => { const y = (U.num(K.wb.v("season_start")) || 2026) + n - 1; return `${y}/${String((y + 1) % 100).padStart(2, "0")}`; };
+  const short = (n) => U.compactMoney(U.euro(n));   // €12,500 -> €13K, €2,200 stays
+
+  /* ------------------------------------------------------------- data */
+  let clubList = null;
+  function clubOptions(K) {
+    if (clubList) return clubList;
+    let names = [], leagues = [];
+    try { names = K.wb.v("club_names") || []; leagues = K.wb.v("club_league") || []; } catch (e) { /* no club data */ }
+    clubList = names.map((r, i) => ({ label: str(r[0]), value: r[0], sub: str(leagues[i] && leagues[i][0]) })).filter((x) => x.label);
+    return clubList;
+  }
+  /* the FC27 database from the workbook's own columns: one record per index, plus picker options */
+  let DB = null;
+  function db(K) {
+    if (DB) return DB;
+    const col = (n) => { try { return K.wb.v(n) || []; } catch (e) { return []; } };
+    const names = col("pdb_names"), club = col("pdb_club"), pos = col("pdb_pos"), ovr = col("pdb_ovr"), age = col("pdb_age"), wage = col("pdb_wage");
+    const at = (a, i) => (a[i] ? a[i][0] : null);
+    const recs = [], opts = [], byName = new Map();
+    for (let i = 0; i < names.length; i++) {
+      const n = at(names, i);
+      if (isBlank(n)) continue;
+      const x = { i, name: String(n), club: str(at(club, i)), pos: str(at(pos, i)), ovr: at(ovr, i), age: at(age, i), wage: at(wage, i) };
+      recs[i] = x;
+      const key = x.name.toLowerCase();
+      if (!byName.has(key)) byName.set(key, i);
+      opts.push({ label: x.name, value: i, sub: [x.club, [x.pos, isBlank(x.ovr) ? "" : x.ovr].filter(Boolean).join(" ")].filter(Boolean).join(" · ") });
+    }
+    DB = { recs, opts, byName };
+    return DB;
+  }
+  const dbRec = (K, p) => {
+    const d = db(K);
+    if (typeof p.dbi === "number" && d.recs[p.dbi] && d.recs[p.dbi].name === str(p.name)) return d.recs[p.dbi];
+    const i = d.byName.get(str(p.name).toLowerCase());
+    return i === undefined ? null : d.recs[i];
+  };
+  const squadRow = (K, row) => {
+    const r = Number(row);
+    if (!(r >= 6 && r <= 45)) return null;
+    const x = U.squad(K)[r - 6];
+    return x && !isBlank(x.name) ? x : null;
+  };
+  /* on loan already: logged (AO) or marked Loaned Out by hand */
+  function onLoan(K) {
+    const g = K.wb.getRange(SQ, "AO6:AO45");
+    return (p) => /^(out|in)$/i.test(str(g[p.row - 6] && g[p.row - 6][0])) || str(p.elig) === "Loaned Out";
+  }
+
+  /* the form's answers, cleaned: share in % (0-100), the season the loan runs to, type, fees */
+  function vals(K, p, wageDefault) {
+    const n = (v) => (isBlank(v) || !isFinite(Number(v)) ? null : Number(v));
+    const pct = n(p.pct) === null ? 50 : Math.max(0, Math.min(100, n(p.pct)));
+    const cur = curSeason(K);
+    const until = Math.max(cur, Math.min(15, n(p.until) || cur));
+    const type = LOAN_TYPES.includes(p.type) ? p.type : "Loan";
+    const wage = n(p.wage) !== null ? n(p.wage) : typeof wageDefault === "number" ? wageDefault : 0;
+    return { pct, until, type, fee: Math.max(0, n(p.fee) || 0), buy: type === "Loan" ? 0 : Math.max(0, n(p.buy) || 0), wage: Math.max(0, wage) };
+  }
+
+  /* ------------------------------------------------------------- rows (bound to the view's params, not cells) */
+  const fmtNum = (v, kind) => (isBlank(v) || !isFinite(Number(v)) ? "" : kind === "pct" ? `${+Number(v).toFixed(2)}%` : U.euro(Number(v)));
+  function numRow(key, label, v, kind, o) {
+    o = o || {};
+    return `<label class="row loan-num"><span class="lab">${label}${o.sub ? `<span class="sub">${o.sub}</span>` : ""}</span><input class="fld" data-lf="${key}" data-kind="${kind}" type="text" inputmode="decimal" enterkeyhint="done" autocomplete="off" spellcheck="false" aria-label="${esc(label)}" placeholder="${esc(o.placeholder || (kind === "pct" ? "0%" : "€0"))}" value="${esc(fmtNum(v, kind))}"></label>`;
+  }
+  function selRow(key, label, options, cur) {
+    const sel = options.find(([v]) => String(v) === String(cur)) || options[0];
+    return `<label class="row"><span class="lab">${label}</span><span class="pick tinted"><span class="pv">${esc(sel ? sel[2] || sel[1] : "")}</span>${S.UPDOWN}<select data-ls="${key}" aria-label="${esc(label)}">${options.map(([v, l]) => `<option value="${esc(v)}"${String(v) === String(cur) ? " selected" : ""}>${esc(l)}</option>`).join("")}</select></span></label>`;
+  }
+  const pickRow = (key, label, val) => `<button type="button" class="row" data-lpick="${key}"><span class="lab">${label}</span><span class="val">${esc(val || "Choose")}</span>${S.CHEV}</button>`;
+  /* the player at the top: Settings account-row style, tap to choose */
+  function hero(o) {
+    return `<div class="sec loan-hero-sec"><div class="list"><button type="button" class="row loan-hero" data-lpick="player">
+      <span class="loan-avw">${o.pos ? `<span class="pos loan-av ${lineOf(o.pos)}">${esc(o.pos)}</span>` : `<span class="pos loan-av loan-av-ph" aria-hidden="true">${icon("person")}</span>`}</span>
+      <span class="lab"><span class="loan-name${o.name ? "" : " tint"}">${esc(o.name || "Choose a Player")}</span><span class="sub">${o.sub}</span></span>${o.ovr !== undefined && !isBlank(o.ovr) ? U.ovrBadge(o.ovr) : ""}${S.CHEV}</button></div></div>`;
+  }
+  function untilRow(K, cur) {
+    const opts = [];
+    for (let s = curSeason(K); s <= 15; s++) opts.push([s, `End of S${s} · ${seasonYears(K, s)}`, `End of S${s}`]);
+    return selRow("until", "Until", opts, cur);
+  }
+  const typeRow = (cur) => selRow("type", "Type", LOAN_TYPES.map((t) => [t, t]), cur);
+  /* the live line under the money: what the club pays of his wage */
+  const live = (wage, share) => (wage > 0 ? `You pay ${U.euro(Math.round(wage * share))}/wk of his ${U.euro(wage)}/wk.` : "");
+  /* what happens when the loan's last season ends (Start New Season does it) */
+  function afterNote(out, v) {
+    const s = `S${v.until}`;
+    if (out) return v.type === "Loan" ? `He comes back at the end of ${s}.` : `He comes back at the end of ${s}. If they buy him, log it as a sale.`;
+    if (v.type === "Loan + obligation to buy") return `You buy him for the buy fee at the end of ${s}.`;
+    if (v.type === "Loan + option to buy") return `He goes back at the end of ${s} unless you buy him.`;
+    return `He goes back at the end of ${s}.`;
+  }
+  const logBtn = () => U.buttons([{ label: "Log Loan…", act: "loanLog", style: "filled" }]);
+
+  /* ------------------------------------------------------------- shared form wiring */
+  function wire(K, root, inst, cfg) {
+    if (inst.loanWired) return;
+    inst.loanWired = true;
+    const p = inst.params;
+    const parse = (el) => {
+      const t = String(el.value || "").replace(/%/g, "").trim();
+      if (!t) return null;
+      const v = el.dataset.kind === "pct" ? Number(t.replace(/,/g, ".")) : window.FCFormat.parse(t, EURO);
+      return typeof v === "number" && isFinite(v) ? v : null;
+    };
+    const paintLive = () => { const el = root.querySelector("[data-loan-live]"); if (el) el.textContent = cfg.live(K, inst.params); };
+    // a field shows its value, or the default it stands for (50%, his database wage); typing shows the bare number
+    root.addEventListener("focusin", (e) => {
+      const el = e.target.closest("[data-lf]");
+      if (!el) return;
+      const v = cfg.shown(K, p, el.dataset.lf);
+      el.value = isBlank(v) ? "" : String(+Number(v).toFixed(6));
+      // only while still focused: WebKit's select() focuses the field again (a quick Enter would reopen it)
+      requestAnimationFrame(() => { if (document.activeElement === el && el.select) el.select(); });
+    });
+    root.addEventListener("input", (e) => {
+      const el = e.target.closest("[data-lf]");
+      if (!el) return;
+      const v = parse(el);
+      p[el.dataset.lf] = v === null ? null : el.dataset.kind === "pct" ? Math.max(0, Math.min(100, v)) : Math.max(0, v);
+      paintLive();
+    });
+    root.addEventListener("focusout", (e) => {
+      const el = e.target.closest("[data-lf]");
+      if (!el) return;
+      el.value = fmtNum(cfg.shown(K, p, el.dataset.lf), el.dataset.kind);
+    });
+    root.addEventListener("keydown", (e) => { const el = e.target.closest("[data-lf]"); if (el && e.key === "Enter") el.blur(); });
+    root.addEventListener("change", (e) => {
+      const el = e.target.closest("[data-ls]");
+      if (!el) return;
+      p[el.dataset.ls] = el.dataset.ls === "until" ? Number(el.value) : el.value;
+      S.rerender();   // the buy fee row comes and goes with the type; the note follows the season
+    });
+    root.addEventListener("click", async (e) => {
+      const b = e.target.closest("[data-lpick]");
+      if (!b) return;
+      if (b.dataset.lpick === "club") {
+        const v = await S.pick({ title: cfg.clubTitle, options: clubOptions(K), value: cfg.club(K, p), custom: true, customNote: "Not in the FC27 database? Use the club's name." });
+        if (isBlank(v)) return;
+        p.club = String(v);
+        S.rerender();
+      } else if (b.dataset.lpick === "player") {
+        if (await cfg.pickPlayer(K, p)) S.rerender();
+      }
+    });
+  }
+  async function askWindow(K) {
+    let wins = [];
+    try { wins = flat(K.wb.v("list_windows")).map(String); } catch (e) { wins = []; }
+    if (!wins.length) wins = ["Summer", "Winter"];
+    const i = await S.actionSheet({ title: "Transfer Window", message: "Which window is this loan in?", buttons: wins.map((w) => ({ label: w })).concat([{ label: "Cancel", style: "cancel" }]) });
+    return i >= 0 && i < wins.length ? wins[i] : null;
+  }
+  /* run the macro, show the result the iOS way; back to where the form was opened from when it worked */
+  async function run(name, args, okText) {
+    const a = fc();
+    if (typeof a.M[name] !== "function") { await S.alert({ title: "Not Available", message: "This version can't log loans yet." }); return; }
+    await S.busyNow("Working");
+    let r;
+    try { r = String(a.M[name](...args) || ""); } finally { S.idle(); }
+    // success: a short banner (the macro's full sentence is for the spreadsheet); problems: the full alert
+    if (/^OK/.test(r)) { S.banner(okText || r.replace(/^OK:\s*/, ""), "", "Loan Logged"); await S.pop(); }
+    else await a.showResult(r);
+  }
+
+  /* ================================================================ Loan Out */
+  const OUT = {
+    clubTitle: "To Club",
+    club: (K, p) => str(p.club),
+    shown: (K, p, key) => (key === "pct" ? vals(K, p).pct : p[key]),
+    live(K, p) { const pl = squadRow(K, p.row); const w = pl && typeof pl.wage === "number" ? pl.wage : 0; return live(w, 1 - vals(K, p).pct / 100); },
+    async pickPlayer(K, p) {
+      const away = onLoan(K);
+      const opts = U.squad(K).filter((x) => x.name && !away(x))
+        .sort((a, b) => posRank(a.pos) - posRank(b.pos) || U.num(b.ovr) - U.num(a.ovr))
+        .map((x) => ({ label: String(x.name), value: x.row, sub: [x.pos, isBlank(x.ovr) ? "" : "OVR " + x.ovr, typeof x.wage === "number" ? short(x.wage) + "/wk" : ""].filter(Boolean).join(" · ") }));
+      if (!opts.length) { await S.alert({ title: "No One to Loan Out", message: "Everyone in your squad is already on loan, or the squad is empty." }); return false; }
+      const v = await S.pick({ title: "Player", options: opts, value: p.row });
+      if (isBlank(v)) return false;
+      p.row = Number(v);
+      return true;
+    },
+  };
+  S.view({
+    id: "loan-out",
+    title: "Loan Out",
+    render(K, p) {
+      const pl = squadRow(K, p.row);
+      const v = vals(K, p);
+      const head = hero(pl
+        ? { pos: pl.pos, name: String(pl.name), ovr: pl.ovr, sub: esc([isBlank(pl.age) ? "" : pl.age + " yrs", typeof pl.wage === "number" ? short(pl.wage) + "/wk" : ""].filter(Boolean).join(" · ")) }
+        : { sub: "From your squad" });
+      const deal = U.sec({ header: "Deal", footer: `<span data-loan-live>${esc(OUT.live(K, p))}</span>` },
+        pickRow("club", "To club", str(p.club)) +
+        numRow("fee", "Loan fee", p.fee, "money") +
+        numRow("pct", "They pay", v.pct, "pct", { sub: "Share of his wage" }));
+      const terms = U.sec({ footer: afterNote(true, v) },
+        untilRow(K, v.until) + typeRow(v.type) + (v.type === "Loan" ? "" : numRow("buy", "Buy fee", p.buy, "money")));
+      return `<div class="loan">${head}${deal}${terms}${logBtn()}</div>`;
+    },
+    mount(K, root, p, inst) { wire(K, root, inst, OUT); },
+    actions: {
+      async loanLog(K, args, btn, p) {
+        const pl = squadRow(K, p.row);
+        if (!pl) { await S.alert({ title: "Choose a Player", message: "Pick the player you're loaning out." }); return; }
+        if (!str(p.club)) { await S.alert({ title: "Choose a Club", message: "Pick the club he's joining on loan." }); return; }
+        const win = await askWindow(K);
+        if (win === null) return;
+        const v = vals(K, p);
+        await run("LoanOutCore", [pl.row, str(p.club), curSeason(K), win, v.fee, v.pct / 100, v.until, v.type, v.buy],
+          `${K.wb.get("Squad", "B" + pl.row)} is on loan at ${str(p.club)} until the end of S${v.until}.`);
+      },
+    },
+    covers: ["LoanOutCore", "LoanOut"],
+    enumerate: () => [{}, { row: 6 }, { row: 6, club: "Juventus", fee: 500000, pct: 30, type: "Loan + option to buy", buy: 4000000 }],
+  });
+
+  /* ================================================================ Loan In */
+  /* the club he comes from: the one you picked, else his database club */
+  const inClub = (K, p) => { if (str(p.club)) return str(p.club); const d = dbRec(K, p); return d ? d.club : ""; };
+  const IN = {
+    clubTitle: "From Club",
+    club: (K, p) => inClub(K, p),
+    shown(K, p, key) {
+      if (key === "pct") return vals(K, p).pct;
+      if (key === "wage" && isBlank(p.wage)) { const d = dbRec(K, p); return d && typeof d.wage === "number" ? d.wage : null; }
+      return p[key];
+    },
+    live(K, p) { const d = dbRec(K, p); const v = vals(K, p, d && typeof d.wage === "number" ? d.wage : 0); return live(v.wage, v.pct / 100); },
+    async pickPlayer(K, p) {
+      const d = db(K);
+      const cur = dbRec(K, p);
+      const v = await S.pick({ title: "Player", options: d.opts, value: cur ? cur.i : str(p.name), custom: true,
+        customNote: "A regen or anyone else not in the FC27 database: use his name and type his wage. Set his position and ratings on his player screen afterwards." });
+      if (isBlank(v)) return false;
+      if (typeof v === "number" && d.recs[v]) {
+        const x = d.recs[v];
+        // his database club and wage are the defaults (shown until you change them; clear a field to restore)
+        Object.assign(p, { name: x.name, dbi: v, club: null, wage: null });
+      } else {
+        Object.assign(p, { name: String(v).trim(), dbi: null });
+      }
+      return true;
+    },
+  };
+  S.view({
+    id: "loan-in",
+    title: "Loan In",
+    render(K, p) {
+      const d = dbRec(K, p), name = str(p.name);
+      const v = vals(K, p, d && typeof d.wage === "number" ? d.wage : 0);
+      const s0 = curSeason(K) - 1;
+      const head = hero(d
+        ? { pos: d.pos, name: d.name, ovr: d.ovr, sub: esc([d.club, isBlank(d.age) ? "" : U.num(d.age) + s0 + " yrs"].filter(Boolean).join(" · ")) }
+        : name ? { name, sub: "Not in the FC27 database" } : { sub: "Search the FC27 database" });
+      const wageV = !isBlank(p.wage) ? p.wage : d && typeof d.wage === "number" ? d.wage : null;
+      const deal = U.sec({ header: "Deal", footer: `<span data-loan-live>${esc(IN.live(K, p))}</span>` },
+        pickRow("club", "From club", inClub(K, p)) +
+        numRow("fee", "Loan fee", p.fee, "money") +
+        numRow("wage", "Wage per week", wageV, "money") +
+        numRow("pct", "We pay", v.pct, "pct", { sub: "Share of his wage" }));
+      const terms = U.sec({ footer: afterNote(false, v) },
+        untilRow(K, v.until) + typeRow(v.type) + (v.type === "Loan" ? "" : numRow("buy", "Buy fee", p.buy, "money")));
+      return `<div class="loan">${head}${deal}${terms}${logBtn()}</div>`;
+    },
+    mount(K, root, p, inst) { wire(K, root, inst, IN); },
+    actions: {
+      async loanLog(K, args, btn, p) {
+        const name = str(p.name), club = inClub(K, p);
+        if (!name) { await S.alert({ title: "Choose a Player", message: "Search the FC27 database, or type a regen's name." }); return; }
+        if (!club) { await S.alert({ title: "Choose a Club", message: "Pick the club he's joining you from." }); return; }
+        const d = dbRec(K, p);
+        const v = vals(K, p, d && typeof d.wage === "number" ? d.wage : 0);
+        const win = await askWindow(K);
+        if (win === null) return;
+        await run("LoanInCore", [name, club, curSeason(K), win, v.fee, v.wage, v.pct / 100, v.until, v.type, v.buy],
+          `${name} joins on loan from ${club} until the end of S${v.until}.`);
+      },
+    },
+    covers: ["LoanInCore", "LoanIn"],
+    enumerate: () => [{}, { name: "Erling Haaland" }, { name: "Regen Example", club: "Genoa", fee: 250000, wage: 9000, pct: 40, type: "Loan + obligation to buy", buy: 3000000 }],
   });
 })();
 
@@ -6606,6 +7599,10 @@ class u extends a.FunctionPlugin{avedev(e,t){return this.runFunction(e.args,t,th
     in: svg('<path d="M17.5 6.5 6.5 17.5M6.5 9v8.5H15"/>'),                // arrow.down.left: a player arrives
     out: svg('<path d="M6.5 17.5 17.5 6.5M9 6.5h8.5V15"/>'),               // arrow.up.right: a player leaves
   };
+  /* loan deals: the Deal Type is one of the three loan types (list_deal_types) */
+  const LOAN_TYPES = ["Loan", "Loan + option to buy", "Loan + obligation to buy"];
+  const isLoanType = (t) => LOAN_TYPES.some((x) => same(x, t));
+  const loanTag = `<span class="tf-tag">Loan</span>`;
   const filterGlyph = (on) => (on
     ? `<svg class="i" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9.6" fill="currentColor" stroke="none"/><path d="M7.6 9h8.8M9.6 12.5h4.8M11.2 16h1.6" stroke="var(--bg)" stroke-width="2"/></svg>`
     : svg('<circle cx="12" cy="12" r="9.2"/><path d="M7.6 9h8.8M9.6 12.5h4.8M11.2 16h1.6"/>'));
@@ -6647,6 +7644,21 @@ class u extends a.FunctionPlugin{avedev(e,t){return this.runFunction(e.args,t,th
   function findRow(K, sheet, name) {
     if (isBlank(name)) return 0;
     const i = K.wb.getRange(sheet, `C${FIRST}:C${LAST}`).findIndex((r) => same(r[0], name));
+    return i < 0 ? 0 : FIRST + i;
+  }
+  /* his sale on Transfers Out: a loan row is not a sale (a loan out never marks his signing as sold) */
+  function findSale(K, name) {
+    if (isBlank(name)) return 0;
+    const g = K.wb.getRange(TO, `C${FIRST}:${L_OUT.typeCol}${LAST}`), t = colNum(L_OUT.typeCol) - colNum("C");
+    const i = g.findIndex((r) => same(r[0], name) && !isLoanType(r[t]));
+    return i < 0 ? 0 : FIRST + i;
+  }
+  /* his signing on Transfers In: the permanent deal first, else his loan */
+  function findSigning(K, name) {
+    if (isBlank(name)) return 0;
+    const g = K.wb.getRange(TI, `C${FIRST}:${L_IN.typeCol}${LAST}`), t = colNum(L_IN.typeCol) - colNum("C");
+    let i = g.findIndex((r) => same(r[0], name) && !isLoanType(r[t]));
+    if (i < 0) i = g.findIndex((r) => same(r[0], name));
     return i < 0 ? 0 : FIRST + i;
   }
   function squadRow(K, name) {
@@ -6753,6 +7765,8 @@ class u extends a.FunctionPlugin{avedev(e,t){return this.runFunction(e.args,t,th
       const deals = U.sec({ icons: true },
         U.row({ label: "Buy a Player", icon: U.ic("plus", "var(--green)"), push: "buy" }) +
         U.row({ label: "Sell a Player", icon: U.ic("transfers", "var(--orange)"), push: "sell" }) +
+        U.row({ label: "Loan a Player In", icon: U.ic("undo", "var(--teal)"), push: "loan-in" }) +       // arrow.uturn: here for a while
+        U.row({ label: "Loan a Player Out", icon: U.ic("redo", "var(--teal)"), push: "loan-out" }) +
         U.row({ label: "Renew a Contract", icon: U.ic("pencil", "var(--tint)"), push: "renew" }) +
         U.row({ label: "Player Database", icon: U.ic("db", "var(--indigo)"), push: "db" }));
       // net spend (fees paid minus fees received, every season) only once there is a deal
@@ -6763,10 +7777,11 @@ class u extends a.FunctionPlugin{avedev(e,t){return this.runFunction(e.args,t,th
       const recent = ins.concat(outs).sort(newest).slice(0, 3);
       const recentSec = recent.length ? U.sec({ header: "Recent Deals" }, recent.map((x) => {
         const info = dbInfo(K, x.name);
+        const loan = isLoanType(x.type);
         return U.row({
           icon: U.posChip(info ? info.pos : ""),
           label: esc(x.name),
-          sub: esc(x.club ? `${x.L.dir} ${x.club}` : x.L === L_IN ? "Signed" : "Sold"),
+          sub: esc(x.club ? `${x.L.dir} ${x.club}` : loan ? "" : x.L === L_IN ? "Signed" : "Sold") + (loan ? (x.club ? " " : "") + loanTag : ""),
           value: K.out(x.L.sheet, "E" + x.row, { map: money, blank: "–" }), push: x.L.rowId, params: { row: x.row }, cls: "tf-v",
         });
       }).join("")) : "";
@@ -6788,12 +7803,15 @@ class u extends a.FunctionPlugin{avedev(e,t){return this.runFunction(e.args,t,th
   function dealRow(K, L, x) {
     const info = dbInfo(K, x.name);
     const bits = [];
+    const loan = isLoanType(x.type);
     if (x.club) bits.push(`${L.dir} ${x.club}`);
     if (x.win) bits.push(x.win);
-    if (x.type && x.type !== "Permanent") bits.push(x.type);
+    if (x.type && x.type !== "Permanent" && !loan) bits.push(x.type);
     if (L === L_IN && x.name) { const sold = K.val(TI, "AA" + x.row); if (!isBlank(sold)) bits.push(`Sold S${sold}`); }
     const label = x.name ? esc(x.name) : `<span class="c2">No player chosen</span>`;
-    return `<button type="button" class="row tf-v" data-push="${L.rowId}" data-params='${esc(JSON.stringify({ row: x.row }))}'>${U.posChip(info ? info.pos : "")}<span class="lab">${label}${bits.length ? `<span class="sub">${esc(bits.join(DOT))}</span>` : ""}</span><span class="val">${K.out(L.sheet, "E" + x.row, { map: money, blank: "–" })}</span>${S.CHEV}</button>`;
+    // a loan carries a quiet tag instead of its type (the type is on the deal's own screen)
+    const sub = esc(bits.join(DOT)) + (loan ? (bits.length ? " " : "") + loanTag : "");
+    return `<button type="button" class="row tf-v" data-push="${L.rowId}" data-params='${esc(JSON.stringify({ row: x.row }))}'>${U.posChip(info ? info.pos : "")}<span class="lab">${label}${sub ? `<span class="sub">${sub}</span>` : ""}</span><span class="val">${K.out(L.sheet, "E" + x.row, { map: money, blank: "–" })}</span>${S.CHEV}</button>`;
   }
   function listPane(K, L) {
     const rows = ledgerRows(K, L).sort(newest);
@@ -6806,7 +7824,9 @@ class u extends a.FunctionPlugin{avedev(e,t){return this.runFunction(e.args,t,th
     rows.forEach((x) => { const g = groups[groups.length - 1]; if (g && g.s === x.season) g.list.push(x); else groups.push({ s: x.season, list: [x] }); });
     return groups.map((g) => {
       const fees = g.list.reduce((a, x) => a + U.num(x.fee), 0);
-      return U.sec({ header: seasonName(K, g.s), footer: `${plural(g.list.length, L.one, L.many)} · ${U.compactMoney(U.euro(fees))} in fees` }, g.list.map((x) => dealRow(K, L, x)).join(""));
+      const loans = g.list.filter((x) => isLoanType(x.type)).length, deals = g.list.length - loans;
+      const count = [deals ? plural(deals, L.one, L.many) : "", loans ? plural(loans, "loan", "loans") : ""].filter(Boolean).join(" · ");
+      return U.sec({ header: seasonName(K, g.s), footer: `${count} · ${U.compactMoney(U.euro(fees))} in fees` }, g.list.map((x) => dealRow(K, L, x)).join(""));
     }).join("");
   }
 
@@ -6873,7 +7893,7 @@ class u extends a.FunctionPlugin{avedev(e,t){return this.runFunction(e.args,t,th
   /* ------------------------------------------------------------- one deal: every column */
   const SPEC = {
     tin: [
-      { header: "Deal", footer: "For a loan, put the loan fee in Fee and your share of his wage in Wage.", rows: [["player", "C", "Player"], ["club", "D", "From club"], ["season", "A", "Season"], ["list", "B", "Window"], ["list", "T", "Deal type"]] },
+      { header: "Deal", footer: "For a loan, Fee is the loan fee and Weekly wage is his full wage. The share you pay is set on his player screen.", rows: [["player", "C", "Player"], ["club", "D", "From club"], ["season", "A", "Season"], ["list", "B", "Window"], ["list", "T", "Deal type", { rerender: 1 }]] },
       { header: "Fee and Payment", footer: "Installments are paid in equal parts over the following seasons.",
         rows: [["money", "E", "Fee"], ["money", "F", "Sign-on fee"], ["money", "G", "Agent fee"], ["pct", "H", "Paid in installments"], ["list", "I", "Installment years"], ["calc", "V", "Cash due now", { strong: 1 }], ["calc", "W", "Deferred"]] },
       { header: "Contract", rows: [["num", "J", "Contract years"], ["money", "K", "Weekly wage"]] },
@@ -6881,18 +7901,18 @@ class u extends a.FunctionPlugin{avedev(e,t){return this.runFunction(e.args,t,th
         rows: [["money", "N", "Add-ons (maximum)"], ["money", "O", "Add-ons paid"], ["season", "P", "Paid in"], ["calc", "Z", "Add-ons capitalised"]] },
       { header: "Exchange and Clauses", footer: "Sell-on given is the selling club's share when you sell him on.",
         rows: [["text", "L", "Player sent"], ["money", "M", "Exchange value"], ["pct", "Q", "Sell-on given"], ["money", "R", "Buy-back clause"], ["money", "S", "Release clause"]] },
-      { header: "Amortisation", footer: "FFP counts this each season until he's sold.",
+      { header: "Amortisation", footer: "FFP counts this each season until he's sold.", loanFooter: "A loan fee counts in full in its season.",
         rows: [["calc", "X", "Amortisation base"], ["calc", "Y", "Per year", { strong: 1 }], ["sold", "AA", "Sold in"], ["calc", "AB", "Book value at sale"]] },
     ],
     tout: [
-      { header: "Deal", rows: [["player", "C", "Player"], ["club", "D", "To club"], ["season", "A", "Season"], ["list", "B", "Window"], ["list", "Q", "Deal type"]] },
+      { header: "Deal", rows: [["player", "C", "Player"], ["club", "D", "To club"], ["season", "A", "Season"], ["list", "B", "Window"], ["list", "Q", "Deal type", { rerender: 1 }]] },
       { header: "Fee and Payment", footer: "Installments arrive in equal parts over the following seasons.",
         rows: [["money", "E", "Fee"], ["pct", "F", "Paid in installments"], ["list", "G", "Installment years"], ["calc", "W", "Cash now", { strong: 1 }]] },
       { header: "Add-ons", rows: [["money", "H", "Add-ons (maximum)"], ["money", "I", "Add-ons received"], ["season", "J", "Received in"]] },
       { header: "Sell-on", footer: "Sell-on owed comes from the sell-on % on his Transfers In row.",
         rows: [["pct", "K", "Sell-on kept"], ["money", "L", "Sell-on received"], ["season", "M", "Received in"], ["calc", "S", "Sell-on owed (%)"], ["calc", "T", "Sell-on owed"]] },
       { header: "Exchange and Clauses", rows: [["text", "N", "Player received"], ["money", "O", "Exchange value"], ["money", "P", "Buy-back clause"]] },
-      { header: "Result", footer: "Profit on sale is what FFP counts.",
+      { header: "Result", footer: "Profit on sale is what FFP counts.", loanFooter: "A loan fee is income in its season. He isn't sold, so he has no book value.",
         rows: [["calc", "U", "Book value"], ["calc", "V", "Profit on sale", { strong: 1, neg: 1 }]] },
     ],
   };
@@ -6909,7 +7929,7 @@ class u extends a.FunctionPlugin{avedev(e,t){return this.runFunction(e.args,t,th
       case "pct": return U.editRow(K, sh, a, label, { kind: "number", sub: o.sub, placeholder: "0%", cls: "tf-fld" });
       case "num": return U.editRow(K, sh, a, label, { kind: "number", sub: o.sub, placeholder: "0", cls: "tf-fld" });
       case "text": return U.editRow(K, sh, a, label, { kind: "text", sub: o.sub, placeholder: "None" });
-      case "list": return U.editRow(K, sh, a, label, { sub: o.sub });
+      case "list": return U.editRow(K, sh, a, label, { sub: o.sub, rerender: !!o.rerender });
       case "season": return seasonRow(K, sh, a, label, o);
       case "player": return namePickRow(K, sh, a, label, L === L_IN
         ? { title: "Player", list: () => playerOptions(K, L), otherLabel: "Other Player…", otherSub: "A regen, or anyone not in the FC27 database",
@@ -6920,7 +7940,7 @@ class u extends a.FunctionPlugin{avedev(e,t){return this.runFunction(e.args,t,th
         typeTitle: "Other Club", typeMessage: "Type the club's name.", typePlaceholder: "Club" });
       case "sold": {
         const out = K.out(sh, a, { blank: "Not sold", map: (v, t) => (t === "" ? "" : `S${t} · ${seasonYears(K, U.num(v))}`) });
-        const sale = findRow(K, TO, name);
+        const sale = findSale(K, name);
         return U.row({ label, value: out, push: sale ? "tout-row" : null, params: sale ? { row: sale } : null, cls: "tf-v" });
       }
       default: return U.valueRow(K, sh, a, label, { sub: o.sub, valueCls: o.strong ? "strong" : "", state: (v) => (isBlank(v) || v === 0 ? "tf-nil" : o.neg ? neg(v) : ""), map: dash, blank: "–", cls: "tf-v" });
@@ -6944,7 +7964,7 @@ class u extends a.FunctionPlugin{avedev(e,t){return this.runFunction(e.args,t,th
     if (isBlank(name)) return "";
     const rows = [];
     const other = L === L_IN ? L_OUT : L_IN;
-    const or = findRow(K, other.sheet, name);
+    const or = L === L_IN ? findSale(K, name) : findSigning(K, name);
     if (or) rows.push(U.row({ label: L === L_IN ? "View Sale" : "View Signing", push: other.rowId, params: { row: or } }));
     const sq = squadRow(K, name);
     if (sq) rows.push(U.row({ label: "View in Squad", push: "player", params: { row: sq } }));
@@ -6965,7 +7985,8 @@ class u extends a.FunctionPlugin{avedev(e,t){return this.runFunction(e.args,t,th
         if (!(r >= FIRST && r <= LAST)) return `<div class="empty"><b>Not Found</b>This ledger row doesn't exist.</div>`;
         const name = K.wb.get(sh, "C" + r);
         const head = isBlank(name) ? "" : headCard(K, L, r, String(name));
-        const secs = SPEC[L.key].map((sec) => U.sec({ header: sec.header, footer: sec.footer },
+        const loan = isLoanType(K.val(sh, L.typeCol + r));
+        const secs = SPEC[L.key].map((sec) => U.sec({ header: sec.header, footer: loan && sec.loanFooter ? sec.loanFooter : sec.footer },
           sec.rows.map((f) => field(K, L, r, f, name)).join(""))).join("");
         const blocks = BLOCKS[L.key].map(([c, h, f]) => seasonList(K, sh, c, r, h, f, "Nothing yet. Set the season and the fee above.")).join("");
         const notes = U.sec({ header: "Notes" }, `<label class="row">${K.input(sh, L.notesCol + r, { inTable: true, cls: "fld tf-note", kind: "text", label: "Notes", placeholder: "Add a note" })}</label>`);
